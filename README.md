@@ -7,7 +7,7 @@ Private recruiter workspace for every job application submitted through ApexHRM 
 - Authenticated WordPress bridge with a least-privilege export role and recursive Forminator CV normalization.
 - Firebase 2nd-generation scheduled full sync, owner-only dry run/manual sync, lease protection, source hashing, retained-source-deletion state, and Cloud Tasks CV imports.
 - HTTPS/hostname/path allowlisting, 25 MiB limit, extension plus file-signature validation, private Storage writes, and bounded CV retries.
-- Google sign-in provisioning for exactly two configured verified emails.
+- Google sign-in provisioning for the configured owner and recruiter allowlists.
 - Firestore and Storage rules that deny by default and permit recruiters to edit only `recruiter` state.
 - Search-first recruiter UI using Firestore data and MiniSearch over names, email, job references, submitted text, safe raw fields, tags, and CV filenames.
 - Stage, CV, assignee, tag, date, favourite, and source-presence filters; CSV export; CV preview/download; sync monitoring; stale-data warnings.
@@ -64,14 +64,16 @@ Current rollout status, checked on 15 July 2026:
 - Firestore Standard default database exists in `asia-south1`.
 - Firestore rules are deployed.
 - Firebase Hosting is deployed at `https://fb-apexhrm-recruit-intel.web.app`.
+- Firebase Authentication is initialized, Google sign-in is enabled, and the two Hosting domains plus `localhost` and `127.0.0.1` are authorized.
+- The live sign-in control reaches Google Accounts through a full-page redirect without application console errors.
 - Local `.env.local` contains only public Firebase web-app configuration.
 - Functions env allowlist is configured locally with Nilhan's two approved owner emails and Prashanthi's recruiter email.
 
-Billing is still disabled. This blocks Cloud Functions, Cloud Build, Cloud Scheduler, Cloud Tasks, Secret Manager, Firebase Storage bucket creation, Storage rules deployment, WordPress secrets, CV import, backfill, and the four-hour scheduler. Upgrade the project to Blaze before continuing backend rollout.
+Billing is still disabled. A request to raise `My Billing Account` from five to six linked projects was submitted successfully on 15 July 2026; the browser confirmation is saved at `evidence/ui/quota-request-submitted-2026-07-15.png`. Until Google approves that request and the project is linked, Cloud Functions, Cloud Build, Cloud Scheduler, Cloud Tasks, Secret Manager, Firebase Storage bucket creation, Storage rules deployment, WordPress secrets, CV import, backfill, and the four-hour scheduler remain blocked.
 
 ## Production Setup
 
-1. Enable Blaze billing for `fb-apexhrm-recruit-intel`.
+1. After the linked-project quota request is approved, link `fb-apexhrm-recruit-intel` to billing account `01A78A-843481-5612A3`; this enables Blaze without unlinking any existing project. Create the project-scoped US$10 budget with 50%, 90%, and 100% alerts. Budget alerts warn but do not cap spend.
 2. Create the default Firestore database and Storage bucket in `asia-south1`.
 3. Enable Google as a Firebase Authentication provider; authorize domains `localhost` and `127.0.0.1` for local testing.
 4. Create a Firebase Web app, then copy its public web configuration into `.env.local` and the production build environment.
@@ -99,7 +101,7 @@ npm run build
 firebase deploy --only hosting,functions:scheduledApexSync
 ```
 
-The schedule is `0 */4 * * *` in `Asia/Colombo`. Monitor the first three runs and investigate any stale-data warning older than eight hours.
+The schedule is `0 */4 * * *` in `Asia/Colombo`. The app warns after five hours and escalates after eight hours. Monitor the first three scheduled runs before accepting production completion.
 
 ## Current Live Source Evidence
 
@@ -107,8 +109,8 @@ A read-only authenticated check on 15 July 2026 returned 164 form `2989` applica
 
 ## Known Operational Limits
 
-- The first backend production deployment is blocked until Firebase billing is enabled. The approved email allowlist is already configured locally as `nilhan.dev@gmail.com,nilhan@gmail.com` for owner access and `prashanthiratnayake23@gmail.com` for recruiter access.
-- Google sign-in has not been fully initialized yet because the Identity Toolkit admin initialization path also returned `BILLING_NOT_ENABLED` for this project. Enable it from Firebase Console after Blaze is active, or rerun the API setup.
-- The frontend production dependency audit reports zero findings. The Functions production dependency audit currently reports nine moderate transitive findings in Firebase/Google packages and no high or critical findings. The automated all-fixes path proposes breaking version changes, so upgrades should be tested deliberately rather than forced during rollout.
+- The first backend production deployment is blocked until the linked-project quota increase is approved and Firebase billing is enabled. The approved email allowlist is already configured locally as `nilhan.dev@gmail.com,nilhan@gmail.com` for owner access and `prashanthiratnayake23@gmail.com` for recruiter access.
+- The live WordPress bridge is still plugin version `1.0.0`. It returns 164 form `2989` applications but no canonical `files[]`; v2 must be deployed through WordPress or Hostinger production file access before any backfill is accepted.
+- The frontend production dependency audit reports zero findings. The Functions production dependency audit currently reports nine moderate transitive findings in Firebase/Google packages and no high or critical findings. `firebase-functions` is declared at the current compatible `7.2.5`; its peer range still excludes `firebase-admin` 14, so the unsupported automated major downgrade/upgrade path is deliberately not forced.
 - PDF, image, and TXT CVs can preview in-app. DOC/DOCX files download rather than render inline.
 - The client-side search index is appropriate for this archive size. Reassess an external search service only if the archive grows beyond roughly 5,000 applications or browser indexing becomes measurably slow.

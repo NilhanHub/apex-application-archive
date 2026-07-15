@@ -26,7 +26,7 @@ import {
   Star,
   X,
 } from 'lucide-react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithRedirect, signOut } from 'firebase/auth';
 import { demoApplications, demoSyncRuns, demoSyncState } from './data/demoApplications';
 import { auth } from './firebase/auth';
 import { isFirebaseConfigured } from './firebase/env';
@@ -91,12 +91,37 @@ function initials(name: string): string {
     .join('') || 'AP';
 }
 
-export function isArchiveStale(state: SyncState): boolean {
-  if (!state.lastSuccessfulAt) return true;
-  return Date.now() - new Date(state.lastSuccessfulAt).getTime() > 8 * 60 * 60 * 1000;
+export function archiveFreshness(state: SyncState): 'never' | 'current' | 'overdue' | 'critical' {
+  if (!state.lastSuccessfulAt) return 'never';
+  const lastSuccessfulAt = new Date(state.lastSuccessfulAt).getTime();
+  if (Number.isNaN(lastSuccessfulAt)) return 'critical';
+  const age = Date.now() - lastSuccessfulAt;
+  if (age > 8 * 60 * 60 * 1000) return 'critical';
+  if (age > 5 * 60 * 60 * 1000) return 'overdue';
+  return 'current';
 }
 
-function displayError(error: unknown): string {
+export function isArchiveStale(state: SyncState): boolean {
+  return archiveFreshness(state) !== 'current';
+}
+
+export function displayError(error: unknown): string {
+  const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+  const friendlyMessages: Record<string, string> = {
+    'auth/internal-error': 'Google sign-in is not available yet. Please try again shortly or contact the archive owner.',
+    'auth/operation-not-allowed': 'Google sign-in has not been enabled for this archive.',
+    'auth/popup-blocked': 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.',
+    'auth/popup-closed-by-user': 'Sign-in was cancelled before completion.',
+    'auth/network-request-failed': 'The sign-in service could not be reached. Check your connection and try again.',
+    'functions/permission-denied': 'This Google account is not approved for Apex Talent Archive.',
+    'functions/unauthenticated': 'Your sign-in session has expired. Please sign in again.',
+    'functions/not-found': 'The archive service is not available yet. Please try again shortly.',
+    'functions/unavailable': 'The archive service is temporarily unavailable. Please try again.',
+  };
+  if (friendlyMessages[code]) return friendlyMessages[code];
+  if (code.startsWith('auth/') || code.startsWith('functions/')) {
+    return 'The archive could not complete that request. Please try again.';
+  }
   if (error instanceof Error) return error.message;
   return 'Something went wrong. Please try again.';
 }
@@ -160,11 +185,12 @@ function Sidebar({ view, profile, onView, onSignOut }: { view: AppView; profile:
 }
 
 function StatusPill({ state }: { state: SyncState }) {
-  const stale = isArchiveStale(state);
+  const freshness = archiveFreshness(state);
+  const stale = freshness !== 'current';
   return (
     <span className={`sync-pill ${state.status === 'failed' || stale ? 'warning' : state.status}`}>
       <span className="pulse-dot" />
-      {state.status === 'running' ? 'Syncing now' : state.status === 'never_run' ? 'Not synced' : stale ? 'Sync overdue' : 'Archive current'}
+      {state.status === 'running' ? 'Syncing now' : freshness === 'never' ? 'Not synced' : freshness === 'critical' ? 'Sync critically overdue' : freshness === 'overdue' ? 'Sync overdue' : 'Archive current'}
     </span>
   );
 }
@@ -321,6 +347,7 @@ function ApplicationsView({ applications, syncState, demo, onRecruiterChange }: 
   const selected = applications.find((application) => application.id === selectedId) ?? null;
   const tags = useMemo(() => [...new Set(applications.flatMap((application) => application.recruiter.tags))].sort(), [applications]);
   const activeFilters = Object.entries(filters).filter(([key, value]) => value !== (defaultFilters as unknown as Record<string, unknown>)[key]).length;
+  const freshness = archiveFreshness(syncState);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -343,7 +370,7 @@ function ApplicationsView({ applications, syncState, demo, onRecruiterChange }: 
 
   return <>
     <header className="page-header"><div><p className="eyebrow">ApexHRM form 2989</p><h1>Applications</h1><p>Search every submitted field and open the archived CV.</p></div><StatusPill state={syncState} /></header>
-    {isArchiveStale(syncState) ? <div className="stale-banner"><AlertCircle size={18} /><span>{syncState.status === 'never_run' ? 'The archive has not completed its first sync.' : `The last successful sync was ${formatDate(syncState.lastSuccessfulAt, true)}.`}</span></div> : null}
+    {freshness !== 'current' ? <div className={`stale-banner ${freshness === 'critical' ? 'critical' : ''}`} role="alert"><AlertCircle size={18} /><span>{freshness === 'never' ? 'The archive has not completed its first sync.' : freshness === 'critical' ? `Archive data is more than eight hours old. Owner action is required. Last successful sync: ${formatDate(syncState.lastSuccessfulAt, true)}.` : `Archive data is more than five hours old. Last successful sync: ${formatDate(syncState.lastSuccessfulAt, true)}.`}</span></div> : null}
     <section className="search-command" aria-label="Search applications">
       <div className="search-input"><Search size={21} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email, role, application text, tag, or CV filename" aria-label="Search applications" />{query ? <button onClick={() => setQuery('')} aria-label="Clear search"><X size={17} /></button> : <kbd>/</kbd>}</div>
       <button className="button secondary mobile-filter-button" onClick={() => setFiltersOpen((value) => !value)}><Filter size={17} />Filters{activeFilters ? ` (${activeFilters})` : ''}</button>
@@ -435,7 +462,7 @@ export default function App() {
     if (demoMode) return;
     if (!auth) { setError('Firebase is not configured.'); return; }
     setBusy(true); setError('');
-    try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+    try { await signInWithRedirect(auth, new GoogleAuthProvider()); }
     catch (caught) { setError(displayError(caught)); }
     finally { setBusy(false); }
   }

@@ -142,6 +142,7 @@ a { color: inherit; }
 .inline-alert.success { color: #115f57; border-color: #afd3ca; background: var(--green-soft); }
 .inline-alert.compact { margin: 12px 18px 0; padding: 9px 10px; }
 .stale-banner { min-height: 42px; display: flex; align-items: center; gap: 9px; margin: 2px 0 16px; border-left: 4px solid var(--ochre); padding: 9px 13px; color: #714b1c; background: var(--ochre-soft); font-size: 13px; }
+.stale-banner.critical { border-left-color: #b2473f; color: #7c2c28; background: var(--red-soft); }
 
 .search-command { min-height: 68px; display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 8px 8px 0 0; padding: 12px; background: var(--paper); }
 .search-input { min-width: 260px; flex: 1; height: 44px; display: flex; align-items: center; gap: 10px; border: 1px solid #bdc7c2; border-radius: 6px; padding: 0 12px; background: #fff; }

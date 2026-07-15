@@ -42,6 +42,12 @@ export const scheduledApexSync = onSchedule(
     timeZone: 'Asia/Colombo',
     timeoutSeconds: 540,
     memory: '512MiB',
+    maxInstances: 1,
+    retryCount: 3,
+    maxRetrySeconds: 3600,
+    minBackoffSeconds: 60,
+    maxBackoffSeconds: 900,
+    maxDoublings: 3,
     secrets: [wordpressUsername, wordpressApplicationPassword],
   },
   async () => {
@@ -49,7 +55,7 @@ export const scheduledApexSync = onSchedule(
   },
 );
 
-export const provisionUserProfile = onCall({ region: REGION }, async (request) => {
+export const provisionUserProfile = onCall({ region: REGION, maxInstances: 2 }, async (request) => {
   const email = String(request.auth?.token.email ?? '').trim().toLowerCase();
   const emailVerified = request.auth?.token.email_verified === true;
   if (!request.auth?.uid || !email || !emailVerified) {
@@ -82,6 +88,7 @@ export const syncNow = onCall(
     region: REGION,
     timeoutSeconds: 540,
     memory: '512MiB',
+    maxInstances: 1,
     secrets: [wordpressUsername, wordpressApplicationPassword],
   },
   async (request) => {
@@ -101,6 +108,9 @@ export const importCvTask = onTaskDispatched<CvTaskPayload>(
     region: REGION,
     timeoutSeconds: 300,
     memory: '512MiB',
+    maxInstances: 3,
+    concurrency: 1,
+    invoker: 'private',
     retryConfig: {
       maxAttempts: 5,
       minBackoffSeconds: 60,
