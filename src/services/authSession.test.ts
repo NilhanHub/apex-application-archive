@@ -14,13 +14,13 @@ async function settle(): Promise<void> {
 }
 
 function user(): User {
-  return { uid: 'approved-user', email: 'nilhan.dev@gmail.com', emailVerified: true } as User;
+  return { uid: 'approved-user', email: 'authorized-user-2@example.test', emailVerified: true } as User;
 }
 
 function profile(): UserProfile {
   return {
     uid: 'approved-user',
-    email: 'nilhan.dev@gmail.com',
+    email: 'authorized-user-2@example.test',
     displayName: 'Nilhan',
     role: 'owner',
     approved: true,

@@ -27,7 +27,7 @@ afterAll(async () => testEnvironment.cleanup());
 describe('CV storage rules', () => {
   it('allows verified allowlisted users and blocks anonymous reads', async () => {
     const approved = testEnvironment.authenticatedContext('recruiter', {
-      email: 'prashanthiratnayake23@gmail.com',
+      email: 'authorized-user-4@example.test',
       email_verified: true,
     });
 
@@ -41,7 +41,7 @@ describe('CV storage rules', () => {
       email_verified: true,
     });
     const unverified = testEnvironment.authenticatedContext('unverified', {
-      email: 'nilhan.dev@gmail.com',
+      email: 'authorized-user-2@example.test',
       email_verified: false,
     });
 
@@ -51,7 +51,7 @@ describe('CV storage rules', () => {
 
   it('blocks client writes even for approved users', async () => {
     const storage = testEnvironment.authenticatedContext('owner', {
-      email: 'nilhan.dev@gmail.com',
+      email: 'authorized-user-2@example.test',
       email_verified: true,
     }).storage();
     await assertFails(uploadBytes(ref(storage, 'cvs/2989/14/replacement.pdf'), new Uint8Array([1, 2, 3])));

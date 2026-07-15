@@ -6,9 +6,9 @@ import type { UserProfile } from '../types';
 export type ApprovedRole = UserProfile['role'];
 
 const APPROVED_ROLES: Readonly<Record<string, ApprovedRole>> = {
-  'nilhan.dev@gmail.com': 'owner',
-  'nilhan@gmail.com': 'owner',
-  'prashanthiratnayake23@gmail.com': 'recruiter',
+  'authorized-user-2@example.test': 'owner',
+  'authorized-user-3@example.test': 'owner',
+  'authorized-user-4@example.test': 'recruiter',
 };
 
 export class ArchiveAccessError extends Error {

@@ -24,13 +24,13 @@ service cloud.firestore {
     function approvedOwnerEmail() {
       return signedIn()
         && request.auth.token.email_verified == true
-        && request.auth.token.email in ['nilhan.dev@gmail.com', 'nilhan@gmail.com'];
+        && request.auth.token.email in ['authorized-user-2@example.test', 'authorized-user-3@example.test'];
     }
 
     function approvedRecruiterEmail() {
       return signedIn()
         && request.auth.token.email_verified == true
-        && request.auth.token.email == 'prashanthiratnayake23@gmail.com';
+        && request.auth.token.email == 'authorized-user-4@example.test';
     }
 
     function validSelfProvision(uid) {
