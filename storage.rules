@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function approved() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.approved == true;
+    }
+
+    function owner() {
+      return approved()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == "owner";
+    }
+
+    match /cvs/{candidateId}/{fileName} {
+      allow read: if approved();
+      allow write: if owner();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
