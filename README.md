@@ -1,5 +1,8 @@
 # Apex Application Archive
 
+> [!TIP]
+> See [ENGINEERING_OVERVIEW.md](ENGINEERING_OVERVIEW.md) for the ingestion architecture, security boundaries, recruiter workflow, and current verification evidence.
+
 Private recruiter workspace for every job application submitted through ApexHRM Forminator form `2989`. Each submission remains a separate historical application, its CV is copied into private Firebase Storage, and source data is reconciled every four hours without overwriting recruiter-owned fields.
 
 ## Implemented

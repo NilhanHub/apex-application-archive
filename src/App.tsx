@@ -273,7 +273,7 @@ function ApplicationDrawer({ application, onClose, onRecruiterChange, demo }: { 
     setBusy(preview ? 'preview' : 'download'); setError('');
     try {
       const { getCvBlob } = await import('./services/archive');
-      const blob = await getCvBlob(application.cv.storagePath);
+      const blob = await getCvBlob(application.id, preview ? 'preview' : 'download');
       if (preview && application.cv.contentType === 'text/plain') {
         setTextPreview(await blob.text()); setFileUrl('');
       } else if (preview) {

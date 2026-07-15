@@ -4,9 +4,12 @@ service firebase.storage {
   match /b/{bucket}/o {
     function approved() {
       return request.auth != null
-        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.approved == true
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.active == true;
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in [
+          'nilhan.dev@gmail.com',
+          'nilhan@gmail.com',
+          'prashanthiratnayake23@gmail.com'
+        ];
     }
 
     match /cvs/2989/{entryId}/{fileName} {
