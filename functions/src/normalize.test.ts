@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { discoverFiles, isAllowedCvSourceUrl, normalizeEntry, sanitizeFields, stableHash } from './normalize.js';
+import { hasCurrentDownloadedCv } from './sync.js';
 import type { WordPressEntry } from './types.js';
 
 const nestedEntry: WordPressEntry = {
@@ -56,5 +57,25 @@ describe('CV source allowlist', () => {
     expect(isAllowedCvSourceUrl('http://apexhrm.com/wp-content/uploads/forminator/cv.pdf')).toBe(false);
     expect(isAllowedCvSourceUrl('https://example.com/wp-content/uploads/forminator/cv.pdf')).toBe(false);
     expect(isAllowedCvSourceUrl('https://apexhrm.com/private/cv.pdf')).toBe(false);
+  });
+});
+
+describe('sync CV reconciliation', () => {
+  it('counts only the current securely stored CV', () => {
+    const application = normalizeEntry(nestedEntry);
+    expect(hasCurrentDownloadedCv(application, {
+      cv: {
+        status: 'downloaded',
+        sourceHash: application.cv.sourceHash,
+        storagePath: 'cvs/2989/14/Jane-CV.pdf',
+      },
+    })).toBe(true);
+    expect(hasCurrentDownloadedCv(application, {
+      cv: {
+        status: 'downloaded',
+        sourceHash: 'superseded-source',
+        storagePath: 'cvs/2989/14/Jane-CV.pdf',
+      },
+    })).toBe(false);
   });
 });

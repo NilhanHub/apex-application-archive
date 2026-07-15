@@ -11,9 +11,8 @@ import {
   where,
   type DocumentData,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { getBlob, ref } from 'firebase/storage';
-import { db, functions, storage } from '../firebase/data';
+import { auth } from '../firebase/auth';
+import { db } from '../firebase/data';
 import type { ApplicationRecord, RecruiterState, SyncRun, SyncState } from '../types';
 
 function iso(value: unknown): string | null {
@@ -155,14 +154,74 @@ export async function updateRecruiterState(applicationId: string, recruiter: Rec
   });
 }
 
-export async function runApexSync(mode: 'dry-run' | 'apply') {
-  if (!functions) throw new Error('Firebase is not configured.');
-  const callable = httpsCallable<{ mode: 'dry-run' | 'apply' }, Record<string, unknown>>(functions, 'syncNow');
-  const result = await callable({ mode });
-  return result.data;
+function callableError(status: unknown, message: unknown): Error & { code: string } {
+  const normalized = String(status ?? 'INTERNAL').toLowerCase().replace(/_/g, '-');
+  const error = new Error(typeof message === 'string' ? message : 'The archive service could not complete the request.') as Error & { code: string };
+  error.code = `functions/${normalized}`;
+  return error;
 }
 
-export async function getCvBlob(storagePath: string): Promise<Blob> {
-  if (!storage) throw new Error('Firebase is not configured.');
-  return getBlob(ref(storage, storagePath), 25 * 1024 * 1024 + 1);
+async function callHostedFunction<TRequest, TResponse>(path: string, data: TRequest): Promise<TResponse> {
+  const user = auth?.currentUser;
+  if (!user) throw callableError('UNAUTHENTICATED', 'Sign in is required.');
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Authorization: `Bearer ${await user.getIdToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data }),
+      signal: controller.signal,
+    });
+    const body = await response.json().catch(() => ({})) as {
+      data?: TResponse;
+      result?: TResponse;
+      error?: { status?: string; message?: string };
+    };
+    if (!response.ok || body.error) throw callableError(body.error?.status, body.error?.message);
+    const result = body.data ?? body.result;
+    if (result === undefined) throw callableError('INTERNAL', 'The archive service returned an invalid response.');
+    return result;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw callableError('UNAVAILABLE', 'The archive service timed out. Please try again.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+export async function runApexSync(mode: 'dry-run' | 'apply') {
+  return callHostedFunction<{ mode: 'dry-run' | 'apply' }, Record<string, unknown>>('/api/sync-now', { mode });
+}
+
+export async function getCvBlob(applicationId: string, mode: 'preview' | 'download'): Promise<Blob> {
+  const result = await callHostedFunction<
+    { applicationId: string; mode: 'preview' | 'download' },
+    { url: string; expiresAt: string }
+  >('/api/cv-access', { applicationId, mode });
+  const url = new URL(result.url);
+  if (url.protocol !== 'https:' || url.hostname !== 'storage.googleapis.com') {
+    throw new Error('The archive returned an invalid CV download address.');
+  }
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(url, { credentials: 'omit', signal: controller.signal });
+    if (!response.ok) throw new Error(`The archived CV returned HTTP ${response.status}.`);
+    const declaredSize = Number(response.headers.get('content-length') ?? 0);
+    if (declaredSize > 25 * 1024 * 1024) throw new Error('The archived CV exceeds the 25 MiB size limit.');
+    const blob = await response.blob();
+    if (blob.size > 25 * 1024 * 1024) throw new Error('The archived CV exceeds the 25 MiB size limit.');
+    return blob;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }

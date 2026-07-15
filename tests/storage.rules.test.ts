@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { doc, setDoc } from 'firebase/firestore';
 import { getBytes, ref, uploadBytes } from 'firebase/storage';
 
 let testEnvironment: RulesTestEnvironment;
@@ -19,7 +18,6 @@ beforeEach(async () => {
   await testEnvironment.clearFirestore();
   await testEnvironment.clearStorage();
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
-    await setDoc(doc(context.firestore(), 'users/recruiter'), { approved: true, active: true, role: 'recruiter' });
     await uploadBytes(ref(context.storage(), 'cvs/2989/14/cv.pdf'), new Uint8Array([37, 80, 68, 70]));
   });
 });
@@ -27,13 +25,35 @@ beforeEach(async () => {
 afterAll(async () => testEnvironment.cleanup());
 
 describe('CV storage rules', () => {
-  it('allows approved reads and blocks anonymous reads', async () => {
-    await assertSucceeds(getBytes(ref(testEnvironment.authenticatedContext('recruiter').storage(), 'cvs/2989/14/cv.pdf')));
+  it('allows verified allowlisted users and blocks anonymous reads', async () => {
+    const approved = testEnvironment.authenticatedContext('recruiter', {
+      email: 'prashanthiratnayake23@gmail.com',
+      email_verified: true,
+    });
+
+    await assertSucceeds(getBytes(ref(approved.storage(), 'cvs/2989/14/cv.pdf')));
     await assertFails(getBytes(ref(testEnvironment.unauthenticatedContext().storage(), 'cvs/2989/14/cv.pdf')));
   });
 
+  it('blocks unapproved and unverified accounts', async () => {
+    const unapproved = testEnvironment.authenticatedContext('unapproved', {
+      email: 'someone@example.com',
+      email_verified: true,
+    });
+    const unverified = testEnvironment.authenticatedContext('unverified', {
+      email: 'nilhan.dev@gmail.com',
+      email_verified: false,
+    });
+
+    await assertFails(getBytes(ref(unapproved.storage(), 'cvs/2989/14/cv.pdf')));
+    await assertFails(getBytes(ref(unverified.storage(), 'cvs/2989/14/cv.pdf')));
+  });
+
   it('blocks client writes even for approved users', async () => {
-    const storage = testEnvironment.authenticatedContext('recruiter').storage();
+    const storage = testEnvironment.authenticatedContext('owner', {
+      email: 'nilhan.dev@gmail.com',
+      email_verified: true,
+    }).storage();
     await assertFails(uploadBytes(ref(storage, 'cvs/2989/14/replacement.pdf'), new Uint8Array([1, 2, 3])));
   });
 });

@@ -91,6 +91,20 @@ function nextCvState(application: NormalizedApplication, current: Record<string,
   return application.cv;
 }
 
+export function hasCurrentDownloadedCv(
+  application: NormalizedApplication,
+  current: Record<string, unknown> | undefined,
+): boolean {
+  const currentCv = current?.cv && typeof current.cv === 'object' ? (current.cv as Record<string, unknown>) : undefined;
+  return Boolean(
+    application.cv.sourceHash
+      && currentCv?.sourceHash === application.cv.sourceHash
+      && currentCv.status === 'downloaded'
+      && typeof currentCv.storagePath === 'string'
+      && currentCv.storagePath,
+  );
+}
+
 export async function performSync(config: WordPressConfig, mode: 'dry-run' | 'apply'): Promise<SyncResult> {
   const db = getFirestore();
   const token = randomUUID();
@@ -123,6 +137,7 @@ export async function performSync(config: WordPressConfig, mode: 'dry-run' | 'ap
     const currentSnapshot = await db.collection('applications').where('formId', '==', FORM_ID).get();
     const current = new Map(currentSnapshot.docs.map((document) => [document.id, document.data()]));
     const seen = new Set(normalized.map((application) => application.id));
+    const cvAlreadyDownloaded = normalized.filter((application) => hasCurrentDownloadedCv(application, current.get(application.id))).length;
     const now = Timestamp.now();
 
     let inserted = 0;
@@ -222,7 +237,7 @@ export async function performSync(config: WordPressConfig, mode: 'dry-run' | 'ap
         ...result,
         status: cvQueueFailures ? 'completed_with_errors' : 'completed',
         completedAt,
-        cvCompleted: 0,
+        cvCompleted: cvAlreadyDownloaded,
         cvFailures: cvQueueFailures,
       });
       await db.collection('syncState').doc('apexhrm').set(

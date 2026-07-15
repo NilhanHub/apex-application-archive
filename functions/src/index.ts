@@ -5,6 +5,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onTaskDispatched } from 'firebase-functions/v2/tasks';
 import { requireOwner } from './auth.js';
+import { createCvAccessUrl } from './cv-access.js';
 import { importCv, PermanentCvError, recordCvFailure } from './cv.js';
 import { performSync } from './sync.js';
 import type { CvTaskPayload } from './types.js';
@@ -101,6 +102,16 @@ export const syncNow = onCall(
       throw new HttpsError('internal', message);
     }
   },
+);
+
+export const getCvAccessUrl = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 30,
+    memory: '256MiB',
+    maxInstances: 5,
+  },
+  async (request) => createCvAccessUrl(request.auth, request.data),
 );
 
 export const importCvTask = onTaskDispatched<CvTaskPayload>(
