@@ -1,17 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { fileStatusLabel, getInitialSessionFromSearch } from './App';
+import { isArchiveStale, isDevelopmentDemoAllowed } from './App';
+import type { SyncState } from './types';
 
-describe('auth gate initialization', () => {
-  it('requires a user unless an explicit demo route is used', () => {
-    expect(getInitialSessionFromSearch('')).toEqual({ user: null, view: 'workspace' });
-    expect(getInitialSessionFromSearch('?demo=Nilhan&view=ai')).toEqual({ user: 'Nilhan', view: 'ai' });
+describe('authentication boundary', () => {
+  it('allows the fictional demo only in development builds', () => {
+    expect(isDevelopmentDemoAllowed(true, '?demo=1')).toBe(true);
+    expect(isDevelopmentDemoAllowed(false, '?demo=1')).toBe(false);
+    expect(isDevelopmentDemoAllowed(true, '')).toBe(false);
   });
 });
 
-describe('CV status rendering labels', () => {
-  it('maps CV state to recruiter-readable text', () => {
-    expect(fileStatusLabel('missing_upload')).toBe('Missing upload');
-    expect(fileStatusLabel('text_indexed')).toBe('Text indexed');
-    expect(fileStatusLabel('failed')).toBe('Failed');
+describe('sync freshness', () => {
+  const state: SyncState = {
+    status: 'idle',
+    sourceTotal: 164,
+    activeApplications: 164,
+    lastSuccessfulAt: new Date().toISOString(),
+    lastAttemptAt: new Date().toISOString(),
+    nextExpectedAt: null,
+    lastError: null,
+  };
+
+  it('marks never-synced and older-than-eight-hour archives as stale', () => {
+    expect(isArchiveStale({ ...state, lastSuccessfulAt: null })).toBe(true);
+    expect(isArchiveStale({ ...state, lastSuccessfulAt: new Date(Date.now() - 9 * 60 * 60 * 1000).toISOString() })).toBe(true);
+    expect(isArchiveStale(state)).toBe(false);
   });
 });

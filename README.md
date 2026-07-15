@@ -1,101 +1,104 @@
-# Apex Talent Archive
+# Apex Application Archive
 
-Private recruiter-facing CV database for Apex HRM. The app is built as a React + Vite + TypeScript frontend prepared for Firebase Hosting, Auth, Firestore, Storage, and Cloud Functions.
+Private recruiter workspace for every job application submitted through ApexHRM Forminator form `2989`. Each submission remains a separate historical application, its CV is copied into private Firebase Storage, and source data is reconciled every four hours without overwriting recruiter-owned fields.
 
-## What Is Implemented
+## Implemented
 
-- Premium candidate search workspace with filters, saved searches, result reasons, and CSV export.
-- Candidate profile panel with Overview, CV, AI summary, Notes, and Raw data tabs.
-- Pipeline board with drag-and-drop stage updates.
-- AI search panel with recruitment compliance guardrails.
-- Import/sync status page reflecting the current archive shape: 158 submissions, 141 job entries, 17 contact entries, 140 CV references.
-- Firebase-ready data model, rules, hosting config, storage rules, and function placeholders.
+- Authenticated WordPress bridge with a least-privilege export role and recursive Forminator CV normalization.
+- Firebase 2nd-generation scheduled full sync, owner-only dry run/manual sync, lease protection, source hashing, retained-source-deletion state, and Cloud Tasks CV imports.
+- HTTPS/hostname/path allowlisting, 25 MiB limit, extension plus file-signature validation, private Storage writes, and bounded CV retries.
+- Google sign-in provisioning for exactly two configured verified emails.
+- Firestore and Storage rules that deny by default and permit recruiters to edit only `recruiter` state.
+- Search-first recruiter UI using Firestore data and MiniSearch over names, email, job references, submitted text, safe raw fields, tags, and CV filenames.
+- Stage, CV, assignee, tag, date, favourite, and source-presence filters; CSV export; CV preview/download; sync monitoring; stale-data warnings.
+- Development-only fictional preview at `http://localhost:5173/?demo=1`. Production builds cannot enable this route.
 
-Mock candidates are fictional. Do not paste real Gemini/API secrets into frontend code.
+AI search, CV text extraction, semantic ranking, contact-form entries, and automated hiring recommendations are deliberately outside V1.
 
-## Local Setup
+## Local Development
 
 ```powershell
-cd D:\Kiro_master\apex-talent-archive
+cd D:\Kiro_master\apex-application-archive
 npm install
+npm --prefix functions install
 Copy-Item .env.example .env.local
-npm run dev
+npm run dev -- --host 127.0.0.1
 ```
 
-Fill `.env.local` with Firebase web app config only. Firebase web config is not a Gemini secret. Gemini or other AI provider secrets belong in Firebase Secret Manager or Firebase AI Logic server-side paths.
+Put only Firebase web-app configuration in `.env.local`. Never place WordPress passwords, service-account JSON, tokens, or backend secrets in Vite variables.
 
-## Build
+## Verification
 
 ```powershell
-npm run build
+npm run verify
 ```
 
-## Tests
+This runs the WordPress normalization test, frontend and function tests, real Firestore/Storage emulator rule tests, both type checks, and both production builds.
 
-```powershell
-npm run test
-```
+Rendered UI proof is kept in `evidence/ui/applications-laptop.png` and `evidence/ui/applications-mobile.png`.
 
-## Firebase Setup
+## Data Model
 
-1. Create a Firebase project.
-2. Enable Firebase Auth and add approved users for Nilhan and Prashanthi.
-3. Enable Firestore.
-4. Enable Firebase Storage.
-5. Enable Cloud Functions.
-6. Add Firebase web app config to `.env.local`.
-7. Deploy rules and hosting:
+- `applications/{formId}_{entryId}`: source fields, sanitized raw fields, CV state, and recruiter state.
+- `syncRuns/{runId}`: reconciliation and CV outcome counts.
+- `syncState/apexhrm`: freshness, current status, and latest totals.
+- `syncLocks/apexhrm`: backend-only overlap lease.
+- `users/{uid}`: approved Google email, display name, role, and active state.
+- Storage: `cvs/2989/{entryId}/{sanitizedFileName}`.
 
-```powershell
-firebase deploy --only firestore:rules,storage,hosting
-```
+`_forminator_user_ip` is deliberately omitted. A source deletion marks `sourcePresent=false`; it never deletes the archived application or downloaded CV.
 
-## Cloud Functions
+## Firebase Project
 
-The function skeletons are in `functions/src/index.ts`:
-
-- `importCvForCandidate(candidateId)`
-- `importAllMissingCvs()`
-- `extractCvText(candidateId)`
-- `generateCvSummary(candidateId)`
-- `aiCandidateSearch(query)`
-
-Set secrets without committing them:
-
-```powershell
-firebase functions:secrets:set GEMINI_API_KEY
-cd functions
-npm install
-npm run build
-cd ..
-firebase deploy --only functions
-```
-
-Current note: `npm audit --omit=dev` inside `functions` reports moderate transitive advisories through Firebase/Google Cloud packages. The non-forced fix does not resolve them, and the forced/direct major update creates a Firebase peer-version mismatch. Keep the supported Firebase package pair unless a compatible upstream release is available.
-
-## Firestore Collections
-
-- `candidates/{candidateId}`
-- `candidates/{candidateId}/notes/{noteId}`
-- `importRuns/{runId}`
-- `aiSummaries/{candidateId}`
-- `searchDocuments/{candidateId}`
-- `users/{uid}`
-
-## Storage Paths
+The dedicated project already exists:
 
 ```text
-cvs/{candidateId}/{originalFileName}
+Project ID: fb-apexhrm-recruit-intel
+Display name: ApexHRM Recruit Intelligence
+Region: asia-south1
 ```
 
-## AI Compliance
+At the latest check, the project had no web app and billing was disabled. Linking its sole available billing account failed because the account had reached its project-link quota. Free a billing slot or request a quota increase before deploying scheduled functions or Cloud Tasks.
 
-AI can assist summarization and source-grounded search. It must not filter, rank, or recommend candidates using protected characteristics such as gender, age, ethnicity, religion, marital or family status, disability, or health. It must also refuse sensitive residential or socioeconomic proxy filters, including flood-risk address targeting.
+## Production Setup
 
-## Known Next Steps
+1. Enable Blaze billing for `fb-apexhrm-recruit-intel`.
+2. Create the default Firestore database and Storage bucket in `asia-south1`.
+3. Enable Google as a Firebase Authentication provider; authorize domains `localhost` and `127.0.0.1` for local testing.
+4. Create a Firebase Web app, then copy its public web configuration into `.env.local` and the production build environment.
+5. Create `functions/.env.fb-apexhrm-recruit-intel` from `functions/.env.example`, using Nilhan's exact approved Google email for `APEX_OWNER_EMAIL` and Prashanthi's exact approved Google email for `APEX_RECRUITER_EMAIL`.
+6. Set WordPress secrets interactively:
 
-- Replace mock data with Firestore reads.
-- Connect the existing Forminator archive importer to Firebase write paths.
-- Implement real CV download, validation, parsing, OCR, and Storage uploads inside Cloud Functions.
-- Add App Check once the Firebase project exists.
-- Replace the mock AI search with Gemini behind secure Firebase server logic.
+```powershell
+firebase use fb-apexhrm-recruit-intel
+firebase functions:secrets:set WORDPRESS_USERNAME
+firebase functions:secrets:set WORDPRESS_APPLICATION_PASSWORD
+```
+
+7. Deploy the upgraded WordPress plugin from `wordpress-plugin/apex-forminator-bridge`, activate it, and assign `kiro-api` the **Apex Archive Reader** role.
+8. Deploy access, rules, Storage, the manual sync, and CV worker without the scheduler:
+
+```powershell
+firebase deploy --only firestore:rules,storage,functions:provisionUserProfile,functions:syncNow,functions:importCvTask
+```
+
+9. Sign in as the owner, run **Check source**, then **Sync now**. Accept the backfill only when the live WordPress total equals active Firestore applications and every CV reference is ready, queued, or explicitly failed.
+10. Deploy Hosting and only then activate the four-hour scheduler:
+
+```powershell
+npm run build
+firebase deploy --only hosting,functions:scheduledApexSync
+```
+
+The schedule is `0 */4 * * *` in `Asia/Colombo`. Monitor the first three runs and investigate any stale-data warning older than eight hours.
+
+## Current Live Source Evidence
+
+A read-only authenticated check on 15 July 2026 returned 164 form `2989` applications and 163 nested CV uploads. The currently installed v1 bridge exposed zero legacy `cv_urls`; deploy v2 before the Firebase backfill. These numbers are evidence only and are never hardcoded into reconciliation.
+
+## Known Operational Limits
+
+- The first production deployment is blocked until Firebase billing quota is resolved and the two exact approved Google emails are supplied.
+- The Functions production dependency audit currently reports eight moderate transitive findings in Firebase/Google packages and no high or critical findings. The automated all-fixes path proposes breaking version changes, so upgrades should be tested deliberately rather than forced during rollout.
+- PDF, image, and TXT CVs can preview in-app. DOC/DOCX files download rather than render inline.
+- The client-side search index is appropriate for this archive size. Reassess an external search service only if the archive grows beyond roughly 5,000 applications or browser indexing becomes measurably slow.

@@ -1,901 +1,472 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
+  AlertCircle,
   Archive,
   ArrowDownToLine,
-  Brain,
-  BriefcaseBusiness,
-  CheckCircle2,
-  ChevronDown,
-  ClipboardList,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  CircleUserRound,
+  ClipboardCheck,
+  Cloud,
   Copy,
   Database,
-  Download,
-  FileSearch,
-  FileText,
+  ExternalLink,
+  File,
+  FileCheck2,
+  FileClock,
+  FileWarning,
   Filter,
-  Gauge,
-  History,
-  Import,
-  Lock,
-  Mail,
-  PanelRightOpen,
+  FolderSearch2,
+  LogOut,
+  Menu,
+  RefreshCw,
   Search,
-  Settings,
   ShieldCheck,
-  Sparkles,
   Star,
-  Tag,
-  Users,
   X,
 } from 'lucide-react';
-import { mockCandidates, importRuns, pipelineStages } from './data/mockCandidates';
+import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
+import { demoApplications, demoSyncRuns, demoSyncState } from './data/demoApplications';
+import { auth } from './firebase/auth';
 import { isFirebaseConfigured } from './firebase/env';
-import { runMockAiSearch } from './services/ai';
-import { defaultFilters, searchCandidates } from './services/search';
-import type { AiSearchResponse, Candidate, PipelineStage, SearchFilters } from './types';
+import { defaultFilters, searchApplications } from './services/search';
+import type {
+  ApplicationRecord,
+  CvStatus,
+  RecruiterStage,
+  RecruiterState,
+  SearchFilters,
+  SortOption,
+  SyncRun,
+  SyncState,
+  UserProfile,
+} from './types';
+import { PIPELINE_STAGES } from './types';
 
-export type View = 'workspace' | 'pipeline' | 'ai' | 'import' | 'settings';
-type DetailTab = 'Overview' | 'CV' | 'AI summary' | 'Notes' | 'Raw data';
+type AppView = 'applications' | 'sync';
+type DrawerTab = 'Application' | 'CV' | 'Raw data';
 
-const stageAccent: Record<PipelineStage, string> = {
-  New: 'stage-new',
-  Review: 'stage-review',
-  Shortlisted: 'stage-shortlisted',
-  Contacted: 'stage-contacted',
-  Interview: 'stage-interview',
-  Hold: 'stage-hold',
-  Rejected: 'stage-rejected',
-  Placed: 'stage-placed',
+const EMPTY_SYNC_STATE: SyncState = {
+  status: 'never_run',
+  sourceTotal: 0,
+  activeApplications: 0,
+  lastSuccessfulAt: null,
+  lastAttemptAt: null,
+  nextExpectedAt: null,
+  lastError: null,
 };
 
-const savedSearches = [
-  'Sales + technical',
-  'Singapore education',
-  'PLC experience',
-  'Needs CV extraction',
-  'New applicants this month',
-];
+const CV_LABELS: Record<CvStatus, string> = {
+  missing: 'No CV supplied',
+  queued: 'CV queued',
+  downloaded: 'CV ready',
+  failed: 'CV failed',
+};
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value));
+export function isDevelopmentDemoAllowed(development: boolean, search: string): boolean {
+  return development && new URLSearchParams(search).get('demo') === '1';
 }
 
-export function fileStatusLabel(status: Candidate['cv']['downloadStatus']) {
-  return {
-    missing_upload: 'Missing upload',
-    url_known: 'URL known',
-    downloaded: 'Downloaded',
-    text_indexed: 'Text indexed',
-    failed: 'Failed',
-  }[status];
+const demoMode = isDevelopmentDemoAllowed(import.meta.env.DEV, typeof window === 'undefined' ? '' : window.location.search);
+
+function formatDate(value: string | null, includeTime = false): string {
+  if (!value) return 'Not available';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    ...(includeTime ? { hour: '2-digit', minute: '2-digit' } : {}),
+  }).format(date);
 }
 
-export function getInitialSessionFromSearch(search: string): { user: 'Nilhan' | 'Prashanthi' | null; view: View } {
-  const params = new URLSearchParams(search);
-  const demoUser = params.get('demo');
-  const demoView = params.get('view');
-
-  return {
-    user: demoUser === 'Prashanthi' ? 'Prashanthi' : demoUser === 'Nilhan' ? 'Nilhan' : null,
-    view: demoView === 'pipeline' || demoView === 'ai' || demoView === 'import' || demoView === 'settings' ? demoView : 'workspace',
-  };
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || 'AP';
 }
 
-function exportCandidatesCsv(candidates: Candidate[]) {
-  const headers = ['name', 'email', 'phone', 'stage', 'tags', 'submittedAt', 'cvStatus', 'fileName'];
-  const rows = candidates.map((candidate) =>
-    [
-      candidate.fullName,
-      candidate.email,
-      candidate.phone ?? '',
-      candidate.stage,
-      candidate.tags.join('; '),
-      candidate.submittedAt,
-      candidate.cv.downloadStatus,
-      candidate.cv.fileName ?? '',
-    ].map((value) => `"${String(value).replace(/"/g, '""')}"`),
-  );
-  const blob = new Blob([[headers.join(','), ...rows.map((row) => row.join(','))].join('\n')], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'apex-talent-candidates.csv';
-  link.click();
-  URL.revokeObjectURL(url);
+export function isArchiveStale(state: SyncState): boolean {
+  if (!state.lastSuccessfulAt) return true;
+  return Date.now() - new Date(state.lastSuccessfulAt).getTime() > 8 * 60 * 60 * 1000;
 }
 
-function LoginScreen({ onLogin }: { onLogin: (name: 'Nilhan' | 'Prashanthi') => void }) {
+function displayError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return 'Something went wrong. Please try again.';
+}
+
+function LoginScreen({ error, busy, onSignIn }: { error: string; busy: boolean; onSignIn: () => void }) {
   return (
     <main className="login-shell">
-      <section className="login-panel">
-        <div className="brand-mark">
-          <Archive size={30} />
+      <section className="login-brand" aria-label="Apex Talent Archive">
+        <div className="brand-mark large"><Archive size={30} /></div>
+        <p className="eyebrow">Apex HRM private workspace</p>
+        <h1>Every application.<br />Ready when you need it.</h1>
+        <p className="login-copy">Search the ApexHRM applicant archive, review submitted details, and open the original CV from one secure workspace.</p>
+        <div className="login-proof">
+          <span><ShieldCheck size={18} /> Approved accounts only</span>
+          <span><Cloud size={18} /> Synced every four hours</span>
         </div>
+      </section>
+      <section className="login-panel" aria-labelledby="login-title">
         <div>
-          <p className="eyebrow">Private recruitment archive</p>
-          <h1>Apex Talent Archive</h1>
-          <p className="muted">Secure candidate search for Apex HRM.</p>
+          <span className="login-kicker">Recruiter access</span>
+          <h2 id="login-title">Sign in to the archive</h2>
+          <p>Use the approved Google account for Nilhan or Prashanthi.</p>
         </div>
-        <div className="login-actions">
-          <button className="primary-action" onClick={() => onLogin('Nilhan')}>
-            <Lock size={18} /> Continue as Nilhan
-          </button>
-          <button className="secondary-action" onClick={() => onLogin('Prashanthi')}>
-            <Users size={18} /> Continue as Prashanthi
-          </button>
-        </div>
-        <div className="security-note">
-          <ShieldCheck size={18} />
-          <span>Firebase Auth gate ready. Approved users only.</span>
-        </div>
+        {!isFirebaseConfigured && !demoMode ? (
+          <div className="inline-alert danger"><AlertCircle size={18} /><span>Firebase is not configured on this device. Complete the setup in the README before signing in.</span></div>
+        ) : null}
+        {error ? <div className="inline-alert danger" role="alert"><AlertCircle size={18} /><span>{error}</span></div> : null}
+        <button className="button primary wide" onClick={onSignIn} disabled={busy || (!isFirebaseConfigured && !demoMode)}>
+          <CircleUserRound size={19} /> {busy ? 'Checking account...' : 'Continue with Google'}
+        </button>
+        <p className="login-privacy">Applicant information stays inside the approved Firebase project and is not public.</p>
       </section>
     </main>
   );
 }
 
-function TopNav({
-  activeView,
-  setActiveView,
-  currentUser,
-}: {
-  activeView: View;
-  setActiveView: (view: View) => void;
-  currentUser: string;
-}) {
-  const navItems: Array<[View, string, typeof Search]> = [
-    ['workspace', 'Search', Search],
-    ['pipeline', 'Pipeline', BriefcaseBusiness],
-    ['ai', 'AI search', Brain],
-    ['import', 'Import', Import],
-    ['settings', 'Settings', Settings],
-  ];
-
+function Sidebar({ view, profile, onView, onSignOut }: { view: AppView; profile: UserProfile; onView: (view: AppView) => void; onSignOut: () => void }) {
   return (
-    <header className="topbar">
-      <div className="product">
-        <div className="product-icon">
-          <Archive size={21} />
-        </div>
-        <div>
-          <strong>Apex Talent Archive</strong>
-          <span>Recruiter intelligence</span>
-        </div>
+    <aside className="sidebar">
+      <div className="brand-lockup">
+        <div className="brand-mark"><Archive size={21} /></div>
+        <div><strong>Apex</strong><span>Talent Archive</span></div>
       </div>
-      <nav className="nav-tabs" aria-label="Primary">
-        {navItems.map(([view, label, Icon]) => (
-          <button key={view} className={activeView === view ? 'active' : ''} onClick={() => setActiveView(view)}>
-            <Icon size={17} />
-            {label}
-          </button>
-        ))}
+      <nav className="primary-nav" aria-label="Main navigation">
+        <button className={view === 'applications' ? 'active' : ''} onClick={() => onView('applications')}>
+          <FolderSearch2 size={19} /><span>Applications</span>
+        </button>
+        <button className={view === 'sync' ? 'active' : ''} onClick={() => onView('sync')}>
+          <Database size={19} /><span>Sync status</span>
+        </button>
       </nav>
-      <div className="session-pill">
-        <span className={isFirebaseConfigured ? 'online-dot' : 'offline-dot'} />
-        {currentUser}
-      </div>
-    </header>
-  );
-}
-
-function MetricsStrip({ candidates }: { candidates: Candidate[] }) {
-  const metrics = [
-    ['Total candidates', candidates.length, Users],
-    ['New this week', candidates.filter((candidate) => candidate.stage === 'New').length, Gauge],
-    ['CVs indexed', candidates.filter((candidate) => candidate.cv.downloadStatus === 'text_indexed').length, FileSearch],
-    ['Missing CVs', candidates.filter((candidate) => candidate.cv.downloadStatus === 'missing_upload').length, AlertTriangle],
-    ['Shortlisted', candidates.filter((candidate) => candidate.stage === 'Shortlisted').length, Star],
-    ['Placed', candidates.filter((candidate) => candidate.stage === 'Placed').length, CheckCircle2],
-  ] as const;
-
-  return (
-    <section className="metrics-strip" aria-label="Recruiting metrics">
-      {metrics.map(([label, value, Icon]) => (
-        <div className="metric" key={label}>
-          <Icon size={18} />
-          <span>{label}</span>
-          <strong>{value}</strong>
+      <div className="sidebar-footer">
+        <div className="profile-chip">
+          <span className="avatar">{initials(profile.displayName)}</span>
+          <span><strong>{profile.displayName}</strong><small>{profile.role === 'owner' ? 'Archive owner' : 'Recruiter'}</small></span>
         </div>
-      ))}
-    </section>
-  );
-}
-
-function FilterRail({
-  filters,
-  setFilters,
-  tags,
-}: {
-  filters: SearchFilters;
-  setFilters: (filters: SearchFilters) => void;
-  tags: string[];
-}) {
-  return (
-    <aside className="filter-rail">
-      <div className="rail-title">
-        <Filter size={17} />
-        <span>Filters</span>
+        <button className="icon-button inverse" onClick={onSignOut} title="Sign out" aria-label="Sign out"><LogOut size={18} /></button>
       </div>
-      <label>
-        Status
-        <select value={filters.stage} onChange={(event) => setFilters({ ...filters, stage: event.target.value as SearchFilters['stage'] })}>
-          <option value="all">All stages</option>
-          {pipelineStages.map((stage) => (
-            <option key={stage} value={stage}>
-              {stage}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Source form
-        <select
-          value={filters.sourceForm}
-          onChange={(event) => setFilters({ ...filters, sourceForm: event.target.value === 'all' ? 'all' : Number(event.target.value) })}
-        >
-          <option value="all">All forms</option>
-          <option value="2989">Job applications</option>
-          <option value="3107">Contact form</option>
-        </select>
-      </label>
-      <label>
-        CV status
-        <select value={filters.cvStatus} onChange={(event) => setFilters({ ...filters, cvStatus: event.target.value as SearchFilters['cvStatus'] })}>
-          <option value="all">Any status</option>
-          <option value="missing_upload">Missing upload</option>
-          <option value="url_known">URL known</option>
-          <option value="downloaded">Downloaded</option>
-          <option value="text_indexed">Text indexed</option>
-          <option value="failed">Failed</option>
-        </select>
-      </label>
-      <label>
-        File type
-        <select value={filters.fileType} onChange={(event) => setFilters({ ...filters, fileType: event.target.value as SearchFilters['fileType'] })}>
-          <option value="all">Any type</option>
-          <option value="pdf">PDF</option>
-          <option value="docx">DOCX</option>
-          <option value="txt">TXT</option>
-          <option value="jpg">JPG</option>
-          <option value="png">PNG</option>
-        </select>
-      </label>
-      <label>
-        Tags
-        <select value={filters.tag} onChange={(event) => setFilters({ ...filters, tag: event.target.value })}>
-          <option value="">Any tag</option>
-          {tags.map((tag) => (
-            <option key={tag} value={tag}>
-              {tag}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Skill keyword
-        <input value={filters.skill} onChange={(event) => setFilters({ ...filters, skill: event.target.value })} placeholder="SQL, sales, QA" />
-      </label>
-      <label>
-        Company keyword
-        <input value={filters.company} onChange={(event) => setFilters({ ...filters, company: event.target.value })} placeholder="PLC, Hayleys" />
-      </label>
-      <label>
-        Education keyword
-        <input value={filters.education} onChange={(event) => setFilters({ ...filters, education: event.target.value })} placeholder="Singapore" />
-      </label>
-      <label>
-        From
-        <input type="date" value={filters.submittedFrom} onChange={(event) => setFilters({ ...filters, submittedFrom: event.target.value })} />
-      </label>
-      <label>
-        To
-        <input type="date" value={filters.submittedTo} onChange={(event) => setFilters({ ...filters, submittedTo: event.target.value })} />
-      </label>
-      <label className="toggle-row">
-        <input type="checkbox" checked={filters.hasCv} onChange={(event) => setFilters({ ...filters, hasCv: event.target.checked })} />
-        Has CV
-      </label>
-      <label className="toggle-row">
-        <input type="checkbox" checked={filters.hasEmail} onChange={(event) => setFilters({ ...filters, hasEmail: event.target.checked })} />
-        Has email
-      </label>
     </aside>
   );
 }
 
-function SearchCommand({
-  query,
-  setQuery,
-  resultCount,
-  onAi,
-  selectedCount,
-  onExport,
-}: {
-  query: string;
-  setQuery: (query: string) => void;
-  resultCount: number;
-  onAi: () => void;
-  selectedCount: number;
-  onExport: () => void;
-}) {
+function StatusPill({ state }: { state: SyncState }) {
+  const stale = isArchiveStale(state);
   return (
-    <section className="command-center">
-      <div className="search-input-wrap">
-        <Search size={20} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search name, email, skill, company, education, or CV text"
-          aria-label="Candidate search"
-        />
-        <kbd>/</kbd>
-      </div>
-      <div className="command-actions">
-        <span className="result-count">{resultCount} matches</span>
-        <button className="secondary-action" onClick={onAi}>
-          <Sparkles size={17} /> Ask archive
-        </button>
-        <button className="secondary-action" onClick={onExport}>
-          <Download size={17} /> CSV {selectedCount ? `(${selectedCount})` : ''}
-        </button>
-      </div>
-    </section>
+    <span className={`sync-pill ${state.status === 'failed' || stale ? 'warning' : state.status}`}>
+      <span className="pulse-dot" />
+      {state.status === 'running' ? 'Syncing now' : state.status === 'never_run' ? 'Not synced' : stale ? 'Sync overdue' : 'Archive current'}
+    </span>
   );
 }
 
-function CandidateRow({
-  candidate,
-  reasons,
-  snippets,
-  isActive,
-  isSelected,
-  onOpen,
-  onToggleSelected,
-}: {
-  candidate: Candidate;
-  reasons: string[];
-  snippets: string[];
-  isActive: boolean;
-  isSelected: boolean;
-  onOpen: () => void;
-  onToggleSelected: () => void;
-}) {
+function FilterPanel({ filters, tags, onChange, onClear, open }: { filters: SearchFilters; tags: string[]; onChange: (filters: SearchFilters) => void; onClear: () => void; open: boolean }) {
   return (
-    <article className={`candidate-row ${isActive ? 'is-active' : ''}`}>
-      <input type="checkbox" checked={isSelected} onChange={onToggleSelected} aria-label={`Select ${candidate.fullName}`} />
-      <button className="candidate-main" onClick={onOpen}>
-        <div className="candidate-head">
-          <strong>{candidate.fullName}</strong>
-          {candidate.favorite && <Star size={15} className="favorite" fill="currentColor" />}
-          <span className={`stage-chip ${stageAccent[candidate.stage]}`}>{candidate.stage}</span>
-        </div>
-        <div className="candidate-subline">
-          <Mail size={14} />
-          <span>{candidate.email}</span>
-          <span>{formatDate(candidate.submittedAt)}</span>
-        </div>
-        <p>{snippets[0] ?? candidate.aiSummary.shortSummary}</p>
-        <div className="row-tags">
-          {candidate.tags.slice(0, 4).map((tag) => (
-            <span key={tag}>
-              <Tag size={12} />
-              {tag}
-            </span>
-          ))}
-        </div>
-      </button>
-      <div className="row-meta">
-        <span className={`cv-pill cv-${candidate.cv.downloadStatus}`}>{fileStatusLabel(candidate.cv.downloadStatus)}</span>
-        <span className="reason-pill">{reasons.join(', ')}</span>
-        <PanelRightOpen size={18} />
+    <aside className={`filters ${open ? 'mobile-open' : ''}`} aria-label="Application filters">
+      <div className="filters-heading"><strong>Filter applications</strong><button className="text-button" onClick={onClear}>Clear</button></div>
+      <label>Stage<select value={filters.stage} onChange={(event) => onChange({ ...filters, stage: event.target.value as SearchFilters['stage'] })}><option value="all">All stages</option>{PIPELINE_STAGES.map((stage) => <option key={stage}>{stage}</option>)}</select></label>
+      <label>CV status<select value={filters.cvStatus} onChange={(event) => onChange({ ...filters, cvStatus: event.target.value as SearchFilters['cvStatus'] })}><option value="all">All CV states</option><option value="downloaded">CV ready</option><option value="queued">CV queued</option><option value="failed">CV failed</option><option value="missing">No CV supplied</option></select></label>
+      <label>Assigned to<select value={filters.assignedTo} onChange={(event) => onChange({ ...filters, assignedTo: event.target.value })}><option value="all">Anyone</option><option value="Nilhan">Nilhan</option><option value="Prashanthi">Prashanthi</option></select></label>
+      <label>Tag<select value={filters.tag} onChange={(event) => onChange({ ...filters, tag: event.target.value })}><option value="">All tags</option>{tags.map((tag) => <option key={tag}>{tag}</option>)}</select></label>
+      <div className="date-pair"><label>From<input type="date" value={filters.submittedFrom} onChange={(event) => onChange({ ...filters, submittedFrom: event.target.value })} /></label><label>To<input type="date" value={filters.submittedTo} onChange={(event) => onChange({ ...filters, submittedTo: event.target.value })} /></label></div>
+      <div className="filter-checks">
+        <label><input type="checkbox" checked={filters.hasCv} onChange={(event) => onChange({ ...filters, hasCv: event.target.checked })} /><span>Has a CV reference</span></label>
+        <label><input type="checkbox" checked={filters.favoritesOnly} onChange={(event) => onChange({ ...filters, favoritesOnly: event.target.checked })} /><span>Favourites only</span></label>
+        <label><input type="checkbox" checked={filters.sourcePresentOnly} onChange={(event) => onChange({ ...filters, sourcePresentOnly: event.target.checked })} /><span>Still on ApexHRM</span></label>
       </div>
+    </aside>
+  );
+}
+
+function CvBadge({ status }: { status: CvStatus }) {
+  const Icon = status === 'downloaded' ? FileCheck2 : status === 'queued' ? FileClock : status === 'failed' ? FileWarning : File;
+  return <span className={`cv-badge ${status}`}><Icon size={15} />{CV_LABELS[status]}</span>;
+}
+
+function ApplicationRow({ application, reasons, snippet, selected, checked, onOpen, onCheck }: { application: ApplicationRecord; reasons: string[]; snippet?: string; selected: boolean; checked: boolean; onOpen: () => void; onCheck: () => void }) {
+  return (
+    <article className={`application-row ${selected ? 'selected' : ''}`}>
+      <label className="row-check" aria-label={`Select ${application.fullName || 'application'}`}><input type="checkbox" checked={checked} onChange={onCheck} /></label>
+      <button className="application-open" onClick={onOpen}>
+        <span className="candidate-avatar">{initials(application.fullName)}</span>
+        <span className="candidate-identity"><strong>{application.fullName || 'Unnamed applicant'}</strong><small>{application.email || 'No email provided'}</small></span>
+        <span className="role-cell"><strong>{application.jobReference || 'General application'}</strong><small>{snippet || application.applicationMessage || 'No application note supplied.'}</small></span>
+        <span className="row-meta"><CvBadge status={application.cv.status} /><small>{formatDate(application.submittedAt)}</small></span>
+        <span className={`stage-chip stage-${application.recruiter.stage.toLowerCase().replace(/\s/g, '-')}`}>{application.recruiter.stage}</span>
+        <ChevronRight className="row-chevron" size={18} />
+      </button>
+      {reasons.length ? <div className="match-reasons">Matched: {reasons.join(', ')}</div> : null}
     </article>
   );
 }
 
-function DetailPanel({
-  candidate,
-  tab,
-  setTab,
-  onClose,
-  updateStage,
-}: {
-  candidate: Candidate;
-  tab: DetailTab;
-  setTab: (tab: DetailTab) => void;
-  onClose: () => void;
-  updateStage: (stage: PipelineStage) => void;
-}) {
-  const tabs: DetailTab[] = ['Overview', 'CV', 'AI summary', 'Notes', 'Raw data'];
+function safeFieldValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return 'Not provided';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try { return JSON.stringify(value, null, 2); } catch { return 'Unserializable value'; }
+}
 
+function ApplicationDrawer({ application, onClose, onRecruiterChange, demo }: { application: ApplicationRecord; onClose: () => void; onRecruiterChange: (state: RecruiterState) => Promise<void>; demo: boolean }) {
+  const [tab, setTab] = useState<DrawerTab>('Application');
+  const [busy, setBusy] = useState('');
+  const [fileUrl, setFileUrl] = useState('');
+  const [textPreview, setTextPreview] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => () => { if (fileUrl) URL.revokeObjectURL(fileUrl); }, [fileUrl]);
+  useEffect(() => { setTab('Application'); setError(''); setFileUrl(''); setTextPreview(''); }, [application.id]);
+
+  async function changeRecruiter(patch: Partial<RecruiterState>) {
+    setBusy('recruiter'); setError('');
+    try {
+      await onRecruiterChange({ ...application.recruiter, ...patch, lastReviewedAt: new Date().toISOString() });
+    } catch (caught) { setError(displayError(caught)); }
+    finally { setBusy(''); }
+  }
+
+  async function loadCv(preview: boolean) {
+    if (!application.cv.storagePath) return;
+    setBusy(preview ? 'preview' : 'download'); setError('');
+    try {
+      const { getCvBlob } = await import('./services/archive');
+      const blob = await getCvBlob(application.cv.storagePath);
+      if (preview && application.cv.contentType === 'text/plain') {
+        setTextPreview(await blob.text()); setFileUrl('');
+      } else if (preview) {
+        if (fileUrl) URL.revokeObjectURL(fileUrl);
+        setFileUrl(URL.createObjectURL(blob)); setTextPreview('');
+      } else {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = application.cv.originalFileName ?? 'candidate-cv';
+        anchor.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (caught) { setError(displayError(caught)); }
+    finally { setBusy(''); }
+  }
+
+  const previewable = Boolean(application.cv.contentType && (application.cv.contentType === 'application/pdf' || application.cv.contentType.startsWith('image/') || application.cv.contentType === 'text/plain'));
   return (
-    <aside className="detail-panel">
-      <header className="detail-header">
-        <div>
-          <p className="eyebrow">Candidate</p>
-          <h2>{candidate.fullName}</h2>
-          <span>{candidate.email}</span>
-        </div>
-        <button className="icon-button" onClick={onClose} aria-label="Close profile">
-          <X size={20} />
-        </button>
+    <aside className="application-drawer" aria-label={`Application from ${application.fullName}`}>
+      <header className="drawer-header">
+        <div className="drawer-avatar">{initials(application.fullName)}</div>
+        <div><span className="eyebrow">Application #{application.entryId}</span><h2>{application.fullName || 'Unnamed applicant'}</h2><a href={`mailto:${application.email}`}>{application.email || 'No email provided'}</a></div>
+        <button className="icon-button" onClick={onClose} aria-label="Close application"><X size={20} /></button>
       </header>
-      <div className="detail-toolbar">
-        <button className="secondary-action" onClick={() => navigator.clipboard?.writeText(candidate.email)}>
-          <Copy size={16} /> Copy email
-        </button>
-        <a className="secondary-action" href={`mailto:${candidate.email}`}>
-          <Mail size={16} /> Email
-        </a>
-        <select value={candidate.stage} onChange={(event) => updateStage(event.target.value as PipelineStage)}>
-          {pipelineStages.map((stage) => (
-            <option key={stage} value={stage}>
-              {stage}
-            </option>
-          ))}
-        </select>
+      <div className="drawer-actions">
+        <button className="button secondary" onClick={() => navigator.clipboard.writeText(application.email)} disabled={!application.email}><Copy size={16} />Copy email</button>
+        <button className={`icon-button star ${application.recruiter.favorite ? 'active' : ''}`} onClick={() => changeRecruiter({ favorite: !application.recruiter.favorite })} aria-label={application.recruiter.favorite ? 'Remove favourite' : 'Add favourite'}><Star size={19} fill={application.recruiter.favorite ? 'currentColor' : 'none'} /></button>
       </div>
-      <nav className="detail-tabs">
-        {tabs.map((item) => (
-          <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>
-            {item}
-          </button>
-        ))}
-      </nav>
-      <section className="detail-body">
-        {tab === 'Overview' && (
-          <div className="stack">
-            <div className="summary-box">
-              <Brain size={18} />
-              <p>{candidate.aiSummary.shortSummary}</p>
-            </div>
-            <dl className="profile-grid">
-              <div>
-                <dt>Phone</dt>
-                <dd>{candidate.phone ?? 'Not provided'}</dd>
-              </div>
-              <div>
-                <dt>Source</dt>
-                <dd>Form {candidate.formId} / Entry {candidate.entryId}</dd>
-              </div>
-              <div>
-                <dt>Assigned</dt>
-                <dd>{candidate.assignedTo ?? 'Unassigned'}</dd>
-              </div>
-              <div>
-                <dt>Submitted</dt>
-                <dd>{formatDate(candidate.submittedAt)}</dd>
-              </div>
-            </dl>
-            <ChipSection title="Skills" items={candidate.aiSummary.skills} />
-            <ChipSection title="Companies" items={candidate.aiSummary.companies} />
-            <ChipSection title="Education" items={candidate.aiSummary.education} />
+      <div className="review-controls">
+        <label>Stage<select value={application.recruiter.stage} disabled={busy === 'recruiter'} onChange={(event) => changeRecruiter({ stage: event.target.value as RecruiterStage })}>{PIPELINE_STAGES.map((stage) => <option key={stage}>{stage}</option>)}</select></label>
+        <label>Assigned to<select value={application.recruiter.assignedTo ?? ''} disabled={busy === 'recruiter'} onChange={(event) => changeRecruiter({ assignedTo: event.target.value || null })}><option value="">Unassigned</option><option>Nilhan</option><option>Prashanthi</option></select></label>
+      </div>
+      {error ? <div className="inline-alert danger compact" role="alert"><AlertCircle size={16} />{error}</div> : null}
+      <nav className="drawer-tabs">{(['Application', 'CV', 'Raw data'] as DrawerTab[]).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item}</button>)}</nav>
+      <div className="drawer-content">
+        {tab === 'Application' ? <>
+          {!application.sourcePresent ? <div className="inline-alert warning"><Archive size={17} /><span>This application is retained in the archive but is no longer present at ApexHRM.</span></div> : null}
+          <section className="detail-section"><h3>Applied for</h3><p className="role-title">{application.jobReference || 'General application'}</p><span className="muted"><CalendarDays size={15} /> Submitted {formatDate(application.submittedAt, true)}</span></section>
+          <section className="detail-section"><h3>Application message</h3><p className="message-copy">{application.applicationMessage || 'No application message was supplied.'}</p></section>
+          <section className="detail-section"><h3>Tags</h3><div className="tag-list">{application.recruiter.tags.length ? application.recruiter.tags.map((tag) => <span key={tag}>{tag}</span>) : <em>No recruiter tags yet</em>}</div></section>
+          <section className="detail-section detail-grid"><div><span>Email</span><strong>{application.email || 'Not provided'}</strong></div><div><span>Last reviewed</span><strong>{formatDate(application.recruiter.lastReviewedAt)}</strong></div><div><span>Source</span><strong>Forminator form 2989</strong></div><div><span>Last seen</span><strong>{formatDate(application.lastSeenAt, true)}</strong></div></section>
+        </> : null}
+        {tab === 'CV' ? <>
+          <section className="cv-file-summary"><div className="file-icon"><File size={25} /></div><div><strong>{application.cv.originalFileName ?? 'No CV filename'}</strong><span>{application.cv.sizeBytes ? `${Math.ceil(application.cv.sizeBytes / 1024)} KB` : CV_LABELS[application.cv.status]}</span></div><CvBadge status={application.cv.status} /></section>
+          {application.cv.lastError ? <div className="inline-alert danger"><FileWarning size={17} /><span>{application.cv.lastError}</span></div> : null}
+          <div className="cv-actions">
+            <button className="button primary" onClick={() => loadCv(true)} disabled={!previewable || !application.cv.storagePath || busy !== '' || demo}><ExternalLink size={17} />{busy === 'preview' ? 'Opening...' : 'Preview CV'}</button>
+            <button className="button secondary" onClick={() => loadCv(false)} disabled={!application.cv.storagePath || busy !== '' || demo}><ArrowDownToLine size={17} />{busy === 'download' ? 'Downloading...' : 'Download'}</button>
           </div>
-        )}
-        {tab === 'CV' && (
-          <div className="stack">
-            <div className="cv-preview">
-              <FileText size={42} />
-              <strong>{candidate.cv.fileName ?? 'No CV uploaded'}</strong>
-              <span>{fileStatusLabel(candidate.cv.downloadStatus)}</span>
-            </div>
-            <div className="button-grid">
-              <button className="primary-action" disabled={candidate.cv.downloadStatus === 'missing_upload'}>
-                <FileSearch size={17} /> Preview CV
-              </button>
-              <button className="secondary-action" disabled={candidate.cv.downloadStatus === 'missing_upload'}>
-                <ArrowDownToLine size={17} /> Download CV
-              </button>
-              <button className="secondary-action" disabled={!candidate.cv.originalUrl}>
-                <FileText size={17} /> Open source file
-              </button>
-              <button className="secondary-action">
-                <Brain size={17} /> Re-run extraction
-              </button>
-            </div>
-            <dl className="profile-grid">
-              <div>
-                <dt>File type</dt>
-                <dd>{candidate.cv.fileType?.toUpperCase() ?? 'Unknown'}</dd>
-              </div>
-              <div>
-                <dt>Extraction</dt>
-                <dd>{candidate.cv.extractedTextStatus}</dd>
-              </div>
-              <div>
-                <dt>Storage path</dt>
-                <dd>{candidate.cv.storagePath ?? 'Not stored yet'}</dd>
-              </div>
-            </dl>
-            <pre className="cv-text">{candidate.cv.extractedText ?? 'No extracted CV text yet.'}</pre>
-          </div>
-        )}
-        {tab === 'AI summary' && (
-          <div className="stack">
-            <ChipSection title="Strengths" items={candidate.aiSummary.strengths} />
-            <ChipSection title="Interview questions" items={candidate.aiSummary.questionsToAsk} />
-            <ChipSection title="Missing or unclear" items={candidate.aiSummary.redFlags.length ? candidate.aiSummary.redFlags : ['No flags recorded']} />
-            <div className="notice-inline">
-              <ShieldCheck size={17} />
-              <span>AI assists review. Recruiters remain responsible for decisions.</span>
-            </div>
-          </div>
-        )}
-        {tab === 'Notes' && (
-          <div className="stack">
-            {candidate.notes.length ? (
-              candidate.notes.map((note) => (
-                <article className="note" key={note.id}>
-                  <strong>{note.authorName}</strong>
-                  <span>{formatDate(note.createdAt)}</span>
-                  <p>{note.body}</p>
-                </article>
-              ))
-            ) : (
-              <div className="empty-state">No notes yet.</div>
-            )}
-            <textarea placeholder="Add internal note" rows={4} />
-            <button className="primary-action">
-              <ClipboardList size={17} /> Add note
-            </button>
-          </div>
-        )}
-        {tab === 'Raw data' && <pre className="raw-json">{JSON.stringify(candidate.rawFields, null, 2)}</pre>}
-      </section>
+          {demo ? <p className="helper-copy">File access is disabled in the fictional development preview.</p> : null}
+          {fileUrl && application.cv.contentType === 'application/pdf' ? <iframe className="cv-preview" title={`${application.fullName} CV preview`} src={fileUrl} sandbox="" /> : null}
+          {fileUrl && application.cv.contentType?.startsWith('image/') ? <img className="image-preview" src={fileUrl} alt={`${application.fullName} CV`} /> : null}
+          {textPreview ? <pre className="text-preview">{textPreview}</pre> : null}
+        </> : null}
+        {tab === 'Raw data' ? <section className="raw-fields"><p>Original submitted fields are retained for audit and unusual form values. Forminator IP addresses are deliberately excluded.</p>{Object.entries(application.rawFields).map(([key, value]) => <div key={key}><span>{key}</span><pre>{safeFieldValue(value)}</pre></div>)}</section> : null}
+      </div>
     </aside>
   );
 }
 
-function ChipSection({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section>
-      <h3>{title}</h3>
-      <div className="chip-cloud">
-        {items.length ? items.map((item) => <span key={item}>{item}</span>) : <span>None recorded</span>}
-      </div>
-    </section>
-  );
+function exportCsv(applications: ApplicationRecord[]) {
+  const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const rows = [['Name', 'Email', 'Job reference', 'Submitted', 'Stage', 'Assigned to', 'CV status', 'Tags'], ...applications.map((item) => [item.fullName, item.email, item.jobReference, item.submittedAt ?? item.submittedAtRaw, item.recruiter.stage, item.recruiter.assignedTo ?? '', item.cv.status, item.recruiter.tags.join('; ')])];
+  const blob = new Blob([rows.map((row) => row.map(escape).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url; anchor.download = `apex-applications-${new Date().toISOString().slice(0, 10)}.csv`; anchor.click(); URL.revokeObjectURL(url);
 }
 
-function WorkspaceView({
-  candidates,
-  setCandidates,
-  setActiveView,
-}: {
-  candidates: Candidate[];
-  setCandidates: (candidates: Candidate[]) => void;
-  setActiveView: (view: View) => void;
-}) {
+function ApplicationsView({ applications, syncState, demo, onRecruiterChange }: { applications: ApplicationRecord[]; syncState: SyncState; demo: boolean; onRecruiterChange: (id: string, state: RecruiterState) => Promise<void> }) {
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<SearchFilters>(defaultFilters);
-  const [selectedId, setSelectedId] = useState(candidates[0]?.id ?? '');
-  const [detailTab, setDetailTab] = useState<DetailTab>('Overview');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [sort, setSort] = useState<SortOption>('relevance');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const results = useMemo(() => searchApplications(applications, query, filters, sort), [applications, filters, query, sort]);
+  const selected = applications.find((application) => application.id === selectedId) ?? null;
+  const tags = useMemo(() => [...new Set(applications.flatMap((application) => application.recruiter.tags))].sort(), [applications]);
+  const activeFilters = Object.entries(filters).filter(([key, value]) => value !== (defaultFilters as unknown as Record<string, unknown>)[key]).length;
 
-  const tags = useMemo(() => Array.from(new Set(candidates.flatMap((candidate) => candidate.tags))).sort(), [candidates]);
-  const results = useMemo(() => searchCandidates(candidates, query, filters), [candidates, filters, query]);
-  const selectedCandidate = candidates.find((candidate) => candidate.id === selectedId) ?? results[0]?.candidate;
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+      if (event.key === '/' && !typing) { event.preventDefault(); searchRef.current?.focus(); }
+      if (event.key === 'Escape') { setSelectedId(null); setFiltersOpen(false); }
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !typing && results.length) {
+        event.preventDefault();
+        const currentIndex = results.findIndex((result) => result.application.id === selectedId);
+        const direction = event.key === 'ArrowDown' ? 1 : -1;
+        const nextIndex = Math.max(0, Math.min(results.length - 1, currentIndex < 0 ? 0 : currentIndex + direction));
+        setSelectedId(results[nextIndex].application.id);
+      }
+      if (event.key === 'Enter' && !typing && selectedId) setSelectedId(selectedId);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [results, selectedId]);
 
-  const updateStage = (stage: PipelineStage) => {
-    setCandidates(
-      candidates.map((candidate) =>
-        candidate.id === selectedCandidate?.id
-          ? {
-              ...candidate,
-              stage,
-              updatedAt: new Date().toISOString(),
-              activity: [
-                {
-                  id: `act-${Date.now()}`,
-                  type: 'stage_changed',
-                  label: `Moved to ${stage}`,
-                  createdAt: new Date().toISOString(),
-                  actorName: 'Current user',
-                },
-                ...candidate.activity,
-              ],
-            }
-          : candidate,
-      ),
-    );
-  };
-
-  return (
-    <>
-      <MetricsStrip candidates={candidates} />
-      <SearchCommand
-        query={query}
-        setQuery={setQuery}
-        resultCount={results.length}
-        selectedCount={selectedIds.length}
-        onAi={() => setActiveView('ai')}
-        onExport={() => exportCandidatesCsv(selectedIds.length ? candidates.filter((candidate) => selectedIds.includes(candidate.id)) : results.map((result) => result.candidate))}
-      />
-      <div className="saved-searches">
-        {savedSearches.map((saved) => (
-          <button key={saved} onClick={() => setQuery(saved.replace(' + ', ' '))}>
-            {saved}
-          </button>
-        ))}
-      </div>
-      <main className="workspace-grid">
-        <FilterRail filters={filters} setFilters={setFilters} tags={tags} />
-        <section className="results-pane">
-          <div className="bulk-bar">
-            <span>{selectedIds.length ? `${selectedIds.length} selected` : 'Select candidates for bulk actions'}</span>
-            <button className="secondary-action" disabled={!selectedIds.length}>
-              <Tag size={16} /> Tag
-            </button>
-            <button className="secondary-action" disabled={!selectedIds.length}>
-              <ChevronDown size={16} /> Stage
-            </button>
-          </div>
-          {results.length ? (
-            results.map((result) => (
-              <CandidateRow
-                key={result.candidate.id}
-                candidate={result.candidate}
-                reasons={result.reasons}
-                snippets={result.snippets}
-                isActive={selectedCandidate?.id === result.candidate.id}
-                isSelected={selectedIds.includes(result.candidate.id)}
-                onOpen={() => {
-                  setSelectedId(result.candidate.id);
-                  setDetailTab('Overview');
-                }}
-                onToggleSelected={() =>
-                  setSelectedIds((ids) =>
-                    ids.includes(result.candidate.id) ? ids.filter((id) => id !== result.candidate.id) : [...ids, result.candidate.id],
-                  )
-                }
-              />
-            ))
-          ) : (
-            <div className="empty-state">No candidates match the current filters.</div>
-          )}
-        </section>
-        {selectedCandidate && (
-          <DetailPanel
-            candidate={selectedCandidate}
-            tab={detailTab}
-            setTab={setDetailTab}
-            onClose={() => setSelectedId('')}
-            updateStage={updateStage}
-          />
-        )}
-      </main>
-    </>
-  );
+  return <>
+    <header className="page-header"><div><p className="eyebrow">ApexHRM form 2989</p><h1>Applications</h1><p>Search every submitted field and open the archived CV.</p></div><StatusPill state={syncState} /></header>
+    {isArchiveStale(syncState) ? <div className="stale-banner"><AlertCircle size={18} /><span>{syncState.status === 'never_run' ? 'The archive has not completed its first sync.' : `The last successful sync was ${formatDate(syncState.lastSuccessfulAt, true)}.`}</span></div> : null}
+    <section className="search-command" aria-label="Search applications">
+      <div className="search-input"><Search size={21} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email, role, application text, tag, or CV filename" aria-label="Search applications" />{query ? <button onClick={() => setQuery('')} aria-label="Clear search"><X size={17} /></button> : <kbd>/</kbd>}</div>
+      <button className="button secondary mobile-filter-button" onClick={() => setFiltersOpen((value) => !value)}><Filter size={17} />Filters{activeFilters ? ` (${activeFilters})` : ''}</button>
+      <label className="sort-control"><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as SortOption)}><option value="relevance">Relevance</option><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="name">Applicant name</option><option value="reviewed">Recently reviewed</option></select></label>
+    </section>
+    <div className={`workspace-grid ${selected ? 'has-drawer' : ''}`}>
+      <FilterPanel filters={filters} tags={tags} onChange={setFilters} onClear={() => setFilters(defaultFilters)} open={filtersOpen} />
+      <section className="results-pane">
+        <div className="results-toolbar"><div><strong>{results.length}</strong><span>{results.length === 1 ? 'application' : 'applications'}</span>{query ? <small>matching “{query}”</small> : null}</div><div>{checkedIds.length ? <span className="selection-count">{checkedIds.length} selected</span> : null}<button className="button secondary compact-button" onClick={() => exportCsv(checkedIds.length ? applications.filter((item) => checkedIds.includes(item.id)) : results.map((result) => result.application))} disabled={!results.length}><ArrowDownToLine size={16} />Export CSV</button></div></div>
+        <div className="result-columns" aria-hidden="true"><span>Applicant</span><span>Role and application</span><span>CV and date</span><span>Stage</span></div>
+        <div className="application-list">{results.map((result) => <ApplicationRow key={result.application.id} application={result.application} reasons={result.reasons} snippet={result.snippets[0]} selected={selectedId === result.application.id} checked={checkedIds.includes(result.application.id)} onOpen={() => setSelectedId(result.application.id)} onCheck={() => setCheckedIds((ids) => ids.includes(result.application.id) ? ids.filter((id) => id !== result.application.id) : [...ids, result.application.id])} />)}{!results.length ? <div className="empty-state"><FolderSearch2 size={31} /><h2>No applications found</h2><p>Clear a filter or try a broader search phrase.</p><button className="button secondary" onClick={() => { setQuery(''); setFilters(defaultFilters); }}>Clear search</button></div> : null}</div>
+      </section>
+      {selected ? <><button className="drawer-backdrop" onClick={() => setSelectedId(null)} aria-label="Close application" /><ApplicationDrawer application={selected} demo={demo} onClose={() => setSelectedId(null)} onRecruiterChange={(state) => onRecruiterChange(selected.id, state)} /></> : null}
+    </div>
+  </>;
 }
 
-function PipelineView({ candidates, setCandidates }: { candidates: Candidate[]; setCandidates: (candidates: Candidate[]) => void }) {
-  const [draggingId, setDraggingId] = useState<string>('');
-
-  const moveCandidate = (candidateId: string, stage: PipelineStage) => {
-    setCandidates(candidates.map((candidate) => (candidate.id === candidateId ? { ...candidate, stage, updatedAt: new Date().toISOString() } : candidate)));
-  };
-
-  return (
-    <main className="pipeline-board">
-      {pipelineStages.map((stage) => (
-        <section
-          className="pipeline-column"
-          key={stage}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={() => draggingId && moveCandidate(draggingId, stage)}
-        >
-          <header>
-            <span className={`stage-dot ${stageAccent[stage]}`} />
-            <strong>{stage}</strong>
-            <em>{candidates.filter((candidate) => candidate.stage === stage).length}</em>
-          </header>
-          {candidates
-            .filter((candidate) => candidate.stage === stage)
-            .map((candidate) => (
-              <article className="pipeline-card" draggable key={candidate.id} onDragStart={() => setDraggingId(candidate.id)}>
-                <strong>{candidate.fullName}</strong>
-                <span>{candidate.aiSummary.skills.slice(0, 3).join(', ') || 'Skills pending'}</span>
-                <small>{fileStatusLabel(candidate.cv.downloadStatus)}</small>
-              </article>
-            ))}
-        </section>
-      ))}
-    </main>
-  );
-}
-
-function AiView({ candidates }: { candidates: Candidate[] }) {
-  const [query, setQuery] = useState(
-    'Find candidates with sales and technical experience who worked at Sri Lankan PLCs and studied in Singapore.',
-  );
-  const [response, setResponse] = useState<AiSearchResponse>(() => runMockAiSearch(query, candidates));
-  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-
-  return (
-    <main className="ai-layout">
-      <section className="ai-query-panel">
-        <div className="section-title">
-          <Brain size={20} />
-          <h2>Ask the archive</h2>
-        </div>
-        <textarea value={query} onChange={(event) => setQuery(event.target.value)} rows={7} />
-        <div className="button-row">
-          <button className="primary-action" onClick={() => setResponse(runMockAiSearch(query, candidates))}>
-            <Sparkles size={17} /> Run AI search
-          </button>
-          <button className="secondary-action">
-            <Star size={17} /> Save search
-          </button>
-        </div>
-        <div className="notice-inline">
-          <ShieldCheck size={17} />
-          <span>AI assists search and summarization. Protected characteristics are not used for filtering or ranking.</span>
-        </div>
-      </section>
-      <section className="ai-results-panel">
-        <p className={response.excludedUnsafeCriteria.length ? 'compliance-warning' : 'compliance-ok'}>{response.answer}</p>
-        <div className="criteria-grid">
-          <div>
-            <strong>Criteria used</strong>
-            {response.interpretedCriteria.map((criterion) => (
-              <span key={criterion}>{criterion}</span>
-            ))}
-          </div>
-          <div>
-            <strong>Excluded</strong>
-            {response.excludedUnsafeCriteria.length ? response.excludedUnsafeCriteria.map((criterion) => <span key={criterion}>{criterion}</span>) : <span>None</span>}
-          </div>
-        </div>
-        {response.results.map((result) => {
-          const candidate = byId.get(result.candidateId);
-          if (!candidate) return null;
-          return (
-            <article className="ai-result" key={result.candidateId}>
-              <div>
-                <strong>{candidate.fullName}</strong>
-                <span className={`confidence confidence-${result.confidence.toLowerCase()}`}>{result.confidence}</span>
-              </div>
-              {result.evidence.map((evidence) => (
-                <p key={evidence}>{evidence}</p>
-              ))}
-              <button className="secondary-action">
-                <Star size={16} /> Add to shortlist
-              </button>
-            </article>
-          );
-        })}
-      </section>
-    </main>
-  );
-}
-
-function ImportView({ candidates }: { candidates: Candidate[] }) {
-  const totalCvRefs = 140;
-  const downloaded = candidates.filter((candidate) => ['downloaded', 'text_indexed'].includes(candidate.cv.downloadStatus)).length;
-  const indexed = candidates.filter((candidate) => candidate.cv.downloadStatus === 'text_indexed').length;
-  const failed = candidates.filter((candidate) => candidate.cv.downloadStatus === 'failed').length;
-
-  return (
-    <main className="import-layout">
-      <section className="status-grid">
-        {[
-          ['Forminator submissions', 158],
-          ['Job applications', 141],
-          ['CV references', totalCvRefs],
-          ['Downloaded in demo', downloaded],
-          ['Text indexed in demo', indexed],
-          ['Failed in demo', failed],
-        ].map(([label, value]) => (
-          <div className="status-tile" key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </section>
-      <section className="import-actions">
-        <div className="section-title">
-          <Database size={20} />
-          <h2>Import jobs</h2>
-        </div>
-        <div className="button-row">
-          <button className="primary-action">
-            <Import size={17} /> Import missing CVs
-          </button>
-          <button className="secondary-action">
-            <FileSearch size={17} /> Extract pending text
-          </button>
-          <button className="secondary-action">
-            <AlertTriangle size={17} /> Retry failed
-          </button>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Run</th>
-              <th>Started</th>
-              <th>Submissions</th>
-              <th>CVs</th>
-              <th>Errors</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {importRuns.map((run) => (
-              <tr key={run.id}>
-                <td>{run.subcommand}</td>
-                <td>{formatDate(run.startedAt)}</td>
-                <td>{run.insertedSubmissions}</td>
-                <td>{run.copiedCvs}</td>
-                <td>{run.errorCount}</td>
-                <td>{run.exitStatus === 0 ? 'OK' : 'Failed'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-    </main>
-  );
-}
-
-function SettingsView() {
-  return (
-    <main className="settings-layout">
-      <section>
-        <div className="section-title">
-          <ShieldCheck size={20} />
-          <h2>Access</h2>
-        </div>
-        <div className="settings-list">
-          <div>
-            <strong>Approved users</strong>
-            <span>Nilhan, Prashanthi</span>
-          </div>
-          <div>
-            <strong>Auth provider</strong>
-            <span>Firebase Auth</span>
-          </div>
-          <div>
-            <strong>Firebase config</strong>
-            <span>{isFirebaseConfigured ? 'Configured' : 'Waiting for .env.local'}</span>
-          </div>
-        </div>
-      </section>
-      <section>
-        <div className="section-title">
-          <History size={20} />
-          <h2>Backend architecture</h2>
-        </div>
-        <div className="architecture-list">
-          <span>Firestore: candidates, notes, importRuns, aiSummaries, searchDocuments, users</span>
-          <span>Storage: cvs/{'{candidateId}'}/{'{originalFileName}'}</span>
-          <span>Functions: importCvForCandidate, importAllMissingCvs, extractCvText, generateCvSummary, aiSearch</span>
-          <span>Secrets: Gemini/API credentials stay in Firebase Secret Manager or AI Logic server paths</span>
-        </div>
-      </section>
-    </main>
-  );
+function SyncView({ state, runs, profile, demo, onRunSync }: { state: SyncState; runs: SyncRun[]; profile: UserProfile; demo: boolean; onRunSync: (mode: 'dry-run' | 'apply') => Promise<unknown> }) {
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+  async function run(mode: 'dry-run' | 'apply') {
+    if (mode === 'apply' && !window.confirm('Run a full ApexHRM import now? Existing recruiter fields will be preserved.')) return;
+    setBusy(mode); setMessage('');
+    try { await onRunSync(mode); setMessage(mode === 'apply' ? 'The sync has completed.' : 'Source check completed without changing archive data.'); }
+    catch (error) { setMessage(displayError(error)); }
+    finally { setBusy(''); }
+  }
+  const latest = runs[0];
+  return <>
+    <header className="page-header"><div><p className="eyebrow">Source health</p><h1>Sync status</h1><p>Reconcile ApexHRM submissions and CV imports.</p></div><StatusPill state={state} /></header>
+    <section className="sync-summary-band">
+      <div><span>Applications on source</span><strong>{state.sourceTotal}</strong><small>Form 2989</small></div>
+      <div><span>Active in archive</span><strong>{state.activeApplications}</strong><small>Retained records stay separate</small></div>
+      <div><span>Last successful sync</span><strong className="date-value">{formatDate(state.lastSuccessfulAt, true)}</strong><small>Next expected {formatDate(state.nextExpectedAt, true)}</small></div>
+      <div><span>Latest CV outcome</span><strong>{latest ? `${latest.cvCompleted}/${latest.cvReferenced}` : '—'}</strong><small>{latest?.cvFailures ?? 0} failed</small></div>
+    </section>
+    {state.lastError ? <div className="inline-alert danger"><AlertCircle size={18} /><span>{state.lastError}</span></div> : null}
+    {message ? <div className="inline-alert success"><Check size={18} /><span>{message}</span></div> : null}
+    <section className="sync-actions-band"><div><h2>WordPress source check</h2><p>A dry run reads and reconciles the live source without writing applications or queuing CV files.</p></div><div><button className="button secondary" onClick={() => run('dry-run')} disabled={busy !== '' || profile.role !== 'owner' || demo}><ClipboardCheck size={17} />{busy === 'dry-run' ? 'Checking...' : 'Check source'}</button><button className="button primary" onClick={() => run('apply')} disabled={busy !== '' || profile.role !== 'owner' || demo}><RefreshCw size={17} className={busy === 'apply' ? 'spin' : ''} />{busy === 'apply' ? 'Syncing...' : 'Sync now'}</button></div></section>
+    {demo ? <p className="helper-copy sync-helper">Sync controls are disabled in the fictional development preview.</p> : null}
+    <section className="runs-section"><div className="section-heading"><div><h2>Recent runs</h2><p>Every run records reconciliation and CV outcomes.</p></div></div><div className="runs-table"><div className="runs-row header"><span>Started</span><span>Status</span><span>Scanned</span><span>Added</span><span>Updated</span><span>Missing</span><span>CV files</span></div>{runs.map((run) => <div className="runs-row" key={run.id}><span>{formatDate(run.startedAt, true)}</span><span><i className={`run-status ${run.status}`} />{run.status.replace(/_/g, ' ')}</span><span>{run.scanned}</span><span>{run.inserted}</span><span>{run.updated}</span><span>{run.missing}</span><span>{run.cvCompleted} ready / {run.cvFailures} failed</span></div>)}{!runs.length ? <div className="empty-run">No sync runs have been recorded.</div> : null}</div></section>
+  </>;
 }
 
 export default function App() {
-  const initialSession = getInitialSessionFromSearch(window.location.search);
-  const [currentUser, setCurrentUser] = useState<'Nilhan' | 'Prashanthi' | null>(initialSession.user);
-  const [activeView, setActiveView] = useState<View>(initialSession.view);
-  const [candidates, setCandidates] = useState<Candidate[]>(mockCandidates);
+  const [profile, setProfile] = useState<UserProfile | null>(demoMode ? { uid: 'demo-owner', email: 'demo@apexhrm.com', displayName: 'Nilhan', role: 'owner', approved: true, active: true } : null);
+  const [applications, setApplications] = useState<ApplicationRecord[]>(demoMode ? demoApplications : []);
+  const [syncState, setSyncState] = useState<SyncState>(demoMode ? demoSyncState : EMPTY_SYNC_STATE);
+  const [runs, setRuns] = useState<SyncRun[]>(demoMode ? demoSyncRuns : []);
+  const [view, setView] = useState<AppView>('applications');
+  const [authReady, setAuthReady] = useState(demoMode);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  if (!currentUser) {
-    return <LoginScreen onLogin={setCurrentUser} />;
+  useEffect(() => {
+    if (demoMode || !auth) { setAuthReady(true); return; }
+    return onAuthStateChanged(auth, async (user) => {
+      setError('');
+      if (!user) { setProfile(null); setAuthReady(true); return; }
+      try {
+        const { provisionCurrentUser } = await import('./services/access');
+        await provisionCurrentUser();
+        const { loadUserProfile } = await import('./services/archive');
+        setProfile(await loadUserProfile(user));
+      }
+      catch (caught) { setProfile(null); setError(displayError(caught)); if (auth) await signOut(auth); }
+      finally { setAuthReady(true); }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (demoMode || !profile) return;
+    setBusy(true);
+    let disposed = false;
+    const unsubscribers: Array<() => void> = [];
+    void import('./services/archive').then(({ subscribeApplications, subscribeSyncRuns, subscribeSyncState }) => {
+      if (disposed) return;
+      unsubscribers.push(
+        subscribeApplications((data) => { setApplications(data); setBusy(false); }, (caught) => { setError(caught.message); setBusy(false); }),
+        subscribeSyncState(setSyncState, (caught) => setError(caught.message)),
+        subscribeSyncRuns(setRuns, (caught) => setError(caught.message)),
+      );
+    }).catch((caught) => { if (!disposed) { setError(displayError(caught)); setBusy(false); } });
+    return () => { disposed = true; unsubscribers.forEach((unsubscribe) => unsubscribe()); };
+  }, [profile]);
+
+  async function signIn() {
+    if (demoMode) return;
+    if (!auth) { setError('Firebase is not configured.'); return; }
+    setBusy(true); setError('');
+    try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+    catch (caught) { setError(displayError(caught)); }
+    finally { setBusy(false); }
   }
+
+  async function signOutUser() {
+    if (demoMode) { window.location.search = ''; return; }
+    if (auth) await signOut(auth);
+  }
+
+  async function changeRecruiter(applicationId: string, recruiter: RecruiterState) {
+    if (demoMode) {
+      setApplications((items) => items.map((item) => item.id === applicationId ? { ...item, recruiter } : item));
+      return;
+    }
+    const { updateRecruiterState } = await import('./services/archive');
+    await updateRecruiterState(applicationId, recruiter);
+  }
+
+  if (!authReady) return <div className="boot-screen"><RefreshCw className="spin" /><span>Opening the archive...</span></div>;
+  if (!profile) return <LoginScreen error={error} busy={busy} onSignIn={signIn} />;
 
   return (
     <div className="app-shell">
-      <TopNav activeView={activeView} setActiveView={setActiveView} currentUser={currentUser} />
-      <div className="page-frame">
-        {activeView === 'workspace' && <WorkspaceView candidates={candidates} setCandidates={setCandidates} setActiveView={setActiveView} />}
-        {activeView === 'pipeline' && <PipelineView candidates={candidates} setCandidates={setCandidates} />}
-        {activeView === 'ai' && <AiView candidates={candidates} />}
-        {activeView === 'import' && <ImportView candidates={candidates} />}
-        {activeView === 'settings' && <SettingsView />}
-      </div>
+      <Sidebar view={view} profile={profile} onView={(next) => { setView(next); setMenuOpen(false); }} onSignOut={signOutUser} />
+      <main className="app-main">
+        <div className="mobile-bar"><button className="icon-button" onClick={() => setMenuOpen((value) => !value)} aria-label="Open navigation"><Menu size={20} /></button><strong>Apex Talent Archive</strong><StatusPill state={syncState} /></div>
+        {menuOpen ? <div className="mobile-menu"><button onClick={() => { setView('applications'); setMenuOpen(false); }}><FolderSearch2 size={18} />Applications</button><button onClick={() => { setView('sync'); setMenuOpen(false); }}><Database size={18} />Sync status</button><button onClick={signOutUser}><LogOut size={18} />Sign out</button></div> : null}
+        {error ? <div className="global-error" role="alert"><AlertCircle size={17} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error"><X size={16} /></button></div> : null}
+        {busy && view === 'applications' && !applications.length ? <div className="loading-state"><RefreshCw className="spin" /><p>Loading applications...</p></div> : null}
+        {view === 'applications' ? <ApplicationsView applications={applications} syncState={syncState} demo={demoMode} onRecruiterChange={changeRecruiter} /> : <SyncView state={syncState} runs={runs} profile={profile} demo={demoMode} onRunSync={async (mode) => { const { runApexSync } = await import('./services/archive'); return runApexSync(mode); }} />}
+      </main>
     </div>
   );
 }

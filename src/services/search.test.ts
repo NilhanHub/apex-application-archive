@@ -1,25 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { mockCandidates } from '../data/mockCandidates';
-import { runMockAiSearch } from './ai';
-import { defaultFilters, searchCandidates } from './search';
+import { demoApplications } from '../data/demoApplications';
+import { defaultFilters, searchApplications } from './search';
 
-describe('candidate search', () => {
-  it('finds CV text with a fuzzy misspelling', () => {
-    const results = searchCandidates(mockCandidates, 'enginear', defaultFilters);
-    expect(results.some((result) => result.candidate.fullName === 'Malith Senanayake')).toBe(true);
+describe('application search', () => {
+  it('finds exact names and email addresses', () => {
+    expect(searchApplications(demoApplications, 'Anushka Perera', defaultFilters, 'relevance').map((result) => result.application.id)).toEqual(['2989_201']);
+    expect(searchApplications(demoApplications, 'fathima.nazeer@example.com', defaultFilters, 'relevance').map((result) => result.application.id)).toEqual(['2989_200']);
   });
 
-  it('finds PLC and Singapore signals', () => {
-    const results = searchCandidates(mockCandidates, 'PLC Singapore', defaultFilters);
-    expect(results.length).toBeGreaterThan(0);
+  it('matches sensible misspellings without flooding results', () => {
+    const results = searchApplications(demoApplications, 'enginear', defaultFilters, 'relevance');
+    expect(results.map((result) => result.application.fullName)).toEqual(['Ravindu Jayasinghe']);
   });
-});
 
-describe('AI compliance', () => {
-  it('refuses protected-trait recruitment filters', () => {
-    const response = runMockAiSearch('find me a male in his 30s with sales and technical experience', mockCandidates);
-    expect(response.excludedUnsafeCriteria).toContain('gender');
-    expect(response.excludedUnsafeCriteria).toContain('age');
-    expect(response.answer).toContain("can't filter");
+  it('requires all query terms and reports why a result matched', () => {
+    const results = searchApplications(demoApplications, 'technical sales', defaultFilters, 'relevance');
+    expect(results).toHaveLength(1);
+    expect(results[0].application.fullName).toBe('Anushka Perera');
+    expect(results[0].reasons).toContain('Application');
+  });
+
+  it('combines stage and CV filters', () => {
+    const results = searchApplications(
+      demoApplications,
+      '',
+      { ...defaultFilters, stage: 'Review', cvStatus: 'downloaded' },
+      'newest',
+    );
+    expect(results.map((result) => result.application.fullName)).toEqual(['Anushka Perera']);
   });
 });

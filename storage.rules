@@ -2,24 +2,16 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    function signedIn() {
-      return request.auth != null;
-    }
-
     function approved() {
-      return signedIn()
+      return request.auth != null
         && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.approved == true;
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.approved == true
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.active == true;
     }
 
-    function owner() {
-      return approved()
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == "owner";
-    }
-
-    match /cvs/{candidateId}/{fileName} {
+    match /cvs/2989/{entryId}/{fileName} {
       allow read: if approved();
-      allow write: if owner();
+      allow write: if false;
     }
 
     match /{allPaths=**} {

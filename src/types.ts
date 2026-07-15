@@ -1,4 +1,4 @@
-export type PipelineStage =
+export type RecruiterStage =
   | 'New'
   | 'Review'
   | 'Shortlisted'
@@ -8,165 +8,116 @@ export type PipelineStage =
   | 'Rejected'
   | 'Placed';
 
-export type CandidateSource = 'apexhrm_forminator';
+export type CvStatus = 'missing' | 'queued' | 'downloaded' | 'failed';
+export type SortOption = 'relevance' | 'newest' | 'oldest' | 'name' | 'reviewed';
 
-export type CvDownloadStatus =
-  | 'missing_upload'
-  | 'url_known'
-  | 'downloaded'
-  | 'text_indexed'
-  | 'failed';
+export interface ApplicationCv {
+  status: CvStatus;
+  sourcePresent: boolean;
+  sourceUrl: string | null;
+  sourceHash: string | null;
+  originalFileName: string | null;
+  storagePath: string | null;
+  contentType: string | null;
+  sizeBytes: number | null;
+  importedAt: string | null;
+  lastAttemptAt: string | null;
+  lastError: string | null;
+}
 
-export type CvExtractedTextStatus = 'none' | 'pending' | 'complete' | 'failed';
+export interface RecruiterState {
+  stage: RecruiterStage;
+  tags: string[];
+  assignedTo: string | null;
+  favorite: boolean;
+  lastReviewedAt: string | null;
+}
 
-export interface CandidateContact {
+export interface ApplicationRecord {
+  id: string;
+  source: 'apexhrm_forminator';
+  formId: 2989;
+  entryId: number;
+  sourcePresent: boolean;
+  sourceMissingSince: string | null;
   fullName: string;
   email: string;
-  phone?: string;
-  locationText?: string;
-}
-
-export interface CandidateApplication {
-  formId: number;
-  entryId: number;
-  submittedAt: string;
+  applicationMessage: string;
+  jobReference: string;
+  submittedAt: string | null;
+  submittedAtRaw: string;
+  sourceUpdatedAt: string | null;
   rawFields: Record<string, unknown>;
-  message?: string;
-  sourceUrl?: string;
-}
-
-export interface CandidateCv {
-  storagePath?: string;
-  originalUrl?: string;
-  fileName?: string;
-  fileType?: 'pdf' | 'docx' | 'txt' | 'jpg' | 'png' | 'unknown';
-  sizeBytes?: number;
-  downloadStatus: CvDownloadStatus;
-  extractedTextStatus: CvExtractedTextStatus;
-  extractedText?: string;
-}
-
-export interface CandidateAiSummary {
-  shortSummary: string;
-  skills: string[];
-  industries: string[];
-  companies: string[];
-  education: string[];
-  senioritySignals: string[];
-  strengths: string[];
-  questionsToAsk: string[];
-  redFlags: string[];
-  generatedAt?: string;
-  model?: string;
-}
-
-export interface CandidateSearchIndex {
-  candidateId: string;
-  normalizedText: string;
-  cvText: string;
-  companies: string[];
-  education: string[];
-  skills: string[];
-  tags: string[];
-}
-
-export interface CandidateNote {
-  id: string;
-  authorUid: string;
-  authorName: string;
-  body: string;
-  createdAt: string;
-  internalOnly: true;
-}
-
-export interface CandidateActivity {
-  id: string;
-  type:
-    | 'imported'
-    | 'cv_downloaded'
-    | 'ai_summary_generated'
-    | 'note_added'
-    | 'stage_changed'
-    | 'exported';
-  label: string;
-  createdAt: string;
-  actorName?: string;
-}
-
-export interface Candidate {
-  id: string;
-  source: CandidateSource;
-  formId: number;
-  entryId: number;
-  fullName: string;
-  email: string;
-  phone?: string;
-  submittedAt: string;
-  rawFields: Record<string, unknown>;
-  message?: string;
-  cv: CandidateCv;
-  aiSummary: CandidateAiSummary;
-  stage: PipelineStage;
-  tags: string[];
-  assignedTo?: 'Nilhan' | 'Prashanthi';
-  favorite?: boolean;
-  duplicateSignals?: string[];
-  lastReviewedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-  notes: CandidateNote[];
-  activity: CandidateActivity[];
-}
-
-export interface ImportRun {
-  id: string;
-  subcommand: 'wp-sync' | 'cv-import' | 'ai-index';
-  startedAt: string;
-  endedAt?: string;
-  insertedSubmissions: number;
-  copiedCvs: number;
-  archivedEmails: number;
-  errorCount: number;
-  exitStatus: number;
+  cv: ApplicationCv;
+  recruiter: RecruiterState;
+  firstImportedAt: string | null;
+  lastSeenAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface UserProfile {
   uid: string;
   email: string;
-  displayName: 'Nilhan' | 'Prashanthi';
+  displayName: string;
   role: 'owner' | 'recruiter';
   approved: boolean;
+  active: boolean;
+}
+
+export interface SyncRun {
+  id: string;
+  status: 'running' | 'completed' | 'completed_with_errors' | 'failed';
+  startedAt: string | null;
+  completedAt: string | null;
+  sourceTotal: number;
+  scanned: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  missing: number;
+  cvReferenced: number;
+  cvQueued: number;
+  cvCompleted: number;
+  cvFailures: number;
+  error: string | null;
+}
+
+export interface SyncState {
+  status: 'never_run' | 'running' | 'idle' | 'completed_with_errors' | 'failed';
+  sourceTotal: number;
+  activeApplications: number;
+  lastSuccessfulAt: string | null;
+  lastAttemptAt: string | null;
+  nextExpectedAt: string | null;
+  lastError: string | null;
 }
 
 export interface SearchFilters {
-  stage: PipelineStage | 'all';
-  sourceForm: number | 'all';
-  cvStatus: CvDownloadStatus | 'all';
-  fileType: CandidateCv['fileType'] | 'all';
+  stage: RecruiterStage | 'all';
+  cvStatus: CvStatus | 'all';
+  assignedTo: string | 'all';
   tag: string;
-  skill: string;
-  company: string;
-  education: string;
   submittedFrom: string;
   submittedTo: string;
   hasCv: boolean;
-  hasEmail: boolean;
+  favoritesOnly: boolean;
+  sourcePresentOnly: boolean;
 }
 
 export interface SearchResult {
-  candidate: Candidate;
+  application: ApplicationRecord;
+  score: number;
   reasons: string[];
   snippets: string[];
-  score: number;
 }
 
-export interface AiSearchResponse {
-  answer: string;
-  interpretedCriteria: string[];
-  excludedUnsafeCriteria: string[];
-  results: Array<{
-    candidateId: string;
-    confidence: 'High' | 'Medium' | 'Low';
-    evidence: string[];
-  }>;
-}
+export const PIPELINE_STAGES: RecruiterStage[] = [
+  'New',
+  'Review',
+  'Shortlisted',
+  'Contacted',
+  'Interview',
+  'Hold',
+  'Rejected',
+  'Placed',
+];

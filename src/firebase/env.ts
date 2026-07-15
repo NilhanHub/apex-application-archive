@@ -8,3 +8,4 @@ export const firebaseClientConfig = {
 };
 
 export const isFirebaseConfigured = Boolean(firebaseClientConfig.projectId && firebaseClientConfig.apiKey);
+export const useFirebaseEmulators = import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true';

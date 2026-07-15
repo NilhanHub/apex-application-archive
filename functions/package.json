@@ -5,17 +5,19 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "deploy": "firebase deploy --only functions"
   },
   "engines": {
     "node": "22"
   },
   "dependencies": {
-    "@google/genai": "^1.32.0",
     "firebase-admin": "^13.10.0",
     "firebase-functions": "^7.0.1"
   },
   "devDependencies": {
-    "typescript": "~6.0.2"
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.9"
   }
 }

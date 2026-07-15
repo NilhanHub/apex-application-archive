@@ -6,18 +6,31 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function userDoc() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
     }
 
     function approved() {
       return signedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && userDoc().data.approved == true;
+        && exists(userPath())
+        && get(userPath()).data.approved == true
+        && get(userPath()).data.active == true;
     }
 
     function owner() {
-      return approved() && userDoc().data.role == "owner";
+      return approved() && get(userPath()).data.role == 'owner';
+    }
+
+    function validRecruiterState() {
+      let state = request.resource.data.recruiter;
+      return state is map
+        && state.keys().hasOnly(['stage', 'tags', 'assignedTo', 'favorite', 'lastReviewedAt'])
+        && state.stage in ['New', 'Review', 'Shortlisted', 'Contacted', 'Interview', 'Hold', 'Rejected', 'Placed']
+        && state.tags is list
+        && state.tags.size() <= 30
+        && (state.assignedTo == null || state.assignedTo is string)
+        && state.favorite is bool
+        && (state.lastReviewedAt == null || state.lastReviewedAt is timestamp);
     }
 
     match /users/{uid} {
@@ -25,29 +38,27 @@ service cloud.firestore {
       allow create, update, delete: if owner();
     }
 
-    match /candidates/{candidateId} {
+    match /applications/{applicationId} {
       allow read: if approved();
-      allow create, update, delete: if owner();
-
-      match /notes/{noteId} {
-        allow read, create: if approved();
-        allow update, delete: if owner();
-      }
+      allow create, delete: if false;
+      allow update: if approved()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['recruiter', 'updatedAt'])
+        && request.resource.data.updatedAt == request.time
+        && validRecruiterState();
     }
 
-    match /aiSummaries/{candidateId} {
+    match /syncRuns/{runId} {
       allow read: if approved();
-      allow write: if owner();
+      allow write: if false;
     }
 
-    match /searchDocuments/{candidateId} {
+    match /syncState/{stateId} {
       allow read: if approved();
-      allow write: if owner();
+      allow write: if false;
     }
 
-    match /importRuns/{runId} {
-      allow read: if approved();
-      allow write: if owner();
+    match /syncLocks/{lockId} {
+      allow read, write: if false;
     }
 
     match /{document=**} {
