@@ -21,6 +21,32 @@ service cloud.firestore {
       return approved() && get(userPath()).data.role == 'owner';
     }
 
+    function approvedOwnerEmail() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in ['nilhan.dev@gmail.com', 'nilhan@gmail.com'];
+    }
+
+    function approvedRecruiterEmail() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'prashanthiratnayake23@gmail.com';
+    }
+
+    function validSelfProvision(uid) {
+      return request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'approved', 'active', 'provisionedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 100
+        && request.resource.data.approved == true
+        && request.resource.data.active == true
+        && request.resource.data.provisionedAt == request.time
+        && ((approvedOwnerEmail() && request.resource.data.role == 'owner')
+          || (approvedRecruiterEmail() && request.resource.data.role == 'recruiter'));
+    }
+
     function validRecruiterState() {
       let state = request.resource.data.recruiter;
       return state is map
@@ -35,7 +61,8 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if approved() && (request.auth.uid == uid || owner());
-      allow create, update, delete: if owner();
+      allow create: if owner() || validSelfProvision(uid);
+      allow update, delete: if owner();
     }
 
     match /applications/{applicationId} {

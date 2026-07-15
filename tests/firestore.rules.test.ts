@@ -50,3 +50,51 @@ describe('application rules', () => {
     await assertFails(updateDoc(doc(db, 'applications/2989_14'), { fullName: 'Changed by client' }));
   });
 });
+
+describe('approved account provisioning', () => {
+  it('allows approved verified users to create only their assigned role', async () => {
+    const owner = testEnvironment.authenticatedContext('new-owner', {
+      email: 'nilhan.dev@gmail.com',
+      email_verified: true,
+    }).firestore();
+    await assertSucceeds(setDoc(doc(owner, 'users/new-owner'), {
+      uid: 'new-owner',
+      email: 'nilhan.dev@gmail.com',
+      displayName: 'Nilhan',
+      role: 'owner',
+      approved: true,
+      active: true,
+      provisionedAt: serverTimestamp(),
+    }));
+
+    const recruiter = testEnvironment.authenticatedContext('new-recruiter', {
+      email: 'prashanthiratnayake23@gmail.com',
+      email_verified: true,
+    }).firestore();
+    await assertFails(setDoc(doc(recruiter, 'users/new-recruiter'), {
+      uid: 'new-recruiter',
+      email: 'prashanthiratnayake23@gmail.com',
+      displayName: 'Prashanthi',
+      role: 'owner',
+      approved: true,
+      active: true,
+      provisionedAt: serverTimestamp(),
+    }));
+  });
+
+  it('blocks unapproved or unverified self-provisioning', async () => {
+    const unapproved = testEnvironment.authenticatedContext('outsider', {
+      email: 'outsider@example.com',
+      email_verified: true,
+    }).firestore();
+    await assertFails(setDoc(doc(unapproved, 'users/outsider'), {
+      uid: 'outsider',
+      email: 'outsider@example.com',
+      displayName: 'Outsider',
+      role: 'recruiter',
+      approved: true,
+      active: true,
+      provisionedAt: serverTimestamp(),
+    }));
+  });
+});

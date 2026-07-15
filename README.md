@@ -8,6 +8,7 @@ Private recruiter workspace for every job application submitted through ApexHRM 
 - Firebase 2nd-generation scheduled full sync, owner-only dry run/manual sync, lease protection, source hashing, retained-source-deletion state, and Cloud Tasks CV imports.
 - HTTPS/hostname/path allowlisting, 25 MiB limit, extension plus file-signature validation, private Storage writes, and bounded CV retries.
 - Google sign-in provisioning for the configured owner and recruiter allowlists.
+- Rules-enforced self-provisioning fallback for the three verified approved emails, so access does not depend on a deployed callable function.
 - Firestore and Storage rules that deny by default and permit recruiters to edit only `recruiter` state.
 - Search-first recruiter UI using Firestore data and MiniSearch over names, email, job references, submitted text, safe raw fields, tags, and CV filenames.
 - Stage, CV, assignee, tag, date, favourite, and source-presence filters; CSV export; CV preview/download; sync monitoring; stale-data warnings.
@@ -66,6 +67,7 @@ Current rollout status, checked on 15 July 2026:
 - Firebase Hosting is deployed at `https://fb-apexhrm-recruit-intel.web.app`.
 - Firebase Authentication is initialized, Google sign-in is enabled, and the two Hosting domains plus `localhost` and `127.0.0.1` are authorized.
 - The live sign-in control reaches Google Accounts through a full-page redirect without application console errors.
+- The deployed Firestore rules allow each verified approved email to create only its assigned owner/recruiter profile; outsiders and role escalation are denied.
 - Local `.env.local` contains only public Firebase web-app configuration.
 - Functions env allowlist is configured locally with Nilhan's two approved owner emails and Prashanthi's recruiter email.
 
