@@ -58,7 +58,16 @@ Display name: ApexHRM Recruit Intelligence
 Region: asia-south1
 ```
 
-At the latest check, the project had no web app and billing was disabled. Linking its sole available billing account failed because the account had reached its project-link quota. Free a billing slot or request a quota increase before deploying scheduled functions or Cloud Tasks.
+Current rollout status, checked on 15 July 2026:
+
+- Firebase Web app exists: **Apex Application Archive**.
+- Firestore Standard default database exists in `asia-south1`.
+- Firestore rules are deployed.
+- Firebase Hosting is deployed at `https://fb-apexhrm-recruit-intel.web.app`.
+- Local `.env.local` contains only public Firebase web-app configuration.
+- Functions env allowlist is configured locally with Nilhan's two approved owner emails and Prashanthi's recruiter email.
+
+Billing is still disabled. This blocks Cloud Functions, Cloud Build, Cloud Scheduler, Cloud Tasks, Secret Manager, Firebase Storage bucket creation, Storage rules deployment, WordPress secrets, CV import, backfill, and the four-hour scheduler. Upgrade the project to Blaze before continuing backend rollout.
 
 ## Production Setup
 
@@ -66,7 +75,7 @@ At the latest check, the project had no web app and billing was disabled. Linkin
 2. Create the default Firestore database and Storage bucket in `asia-south1`.
 3. Enable Google as a Firebase Authentication provider; authorize domains `localhost` and `127.0.0.1` for local testing.
 4. Create a Firebase Web app, then copy its public web configuration into `.env.local` and the production build environment.
-5. Create `functions/.env.fb-apexhrm-recruit-intel` from `functions/.env.example`, using Nilhan's exact approved Google email for `APEX_OWNER_EMAIL` and Prashanthi's exact approved Google email for `APEX_RECRUITER_EMAIL`.
+5. Create `functions/.env.fb-apexhrm-recruit-intel` from `functions/.env.example`, using comma-separated approved owner emails for `APEX_OWNER_EMAIL` and comma-separated recruiter emails for `APEX_RECRUITER_EMAIL`.
 6. Set WordPress secrets interactively:
 
 ```powershell
@@ -98,7 +107,8 @@ A read-only authenticated check on 15 July 2026 returned 164 form `2989` applica
 
 ## Known Operational Limits
 
-- The first production deployment is blocked until Firebase billing quota is resolved and the two exact approved Google emails are supplied.
+- The first backend production deployment is blocked until Firebase billing is enabled. The approved email allowlist is already configured locally as `nilhan.dev@gmail.com,nilhan@gmail.com` for owner access and `prashanthiratnayake23@gmail.com` for recruiter access.
+- Google sign-in has not been fully initialized yet because the Identity Toolkit admin initialization path also returned `BILLING_NOT_ENABLED` for this project. Enable it from Firebase Console after Blaze is active, or rerun the API setup.
 - The Functions production dependency audit currently reports eight moderate transitive findings in Firebase/Google packages and no high or critical findings. The automated all-fixes path proposes breaking version changes, so upgrades should be tested deliberately rather than forced during rollout.
 - PDF, image, and TXT CVs can preview in-app. DOC/DOCX files download rather than render inline.
 - The client-side search index is appropriate for this archive size. Reassess an external search service only if the archive grows beyond roughly 5,000 applications or browser indexing becomes measurably slow.

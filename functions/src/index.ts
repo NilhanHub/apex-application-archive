@@ -18,6 +18,15 @@ const wordpressBaseUrl = defineString('WORDPRESS_BASE_URL', { default: 'https://
 const apexOwnerEmail = defineString('APEX_OWNER_EMAIL');
 const apexRecruiterEmail = defineString('APEX_RECRUITER_EMAIL');
 
+function emailList(value: string): Set<string> {
+  return new Set(
+    value
+      .split(',')
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
 function wordpressConfig() {
   return {
     baseUrl: wordpressBaseUrl.value(),
@@ -47,9 +56,9 @@ export const provisionUserProfile = onCall({ region: REGION }, async (request) =
     throw new HttpsError('unauthenticated', 'A verified Google account is required.');
   }
 
-  const ownerEmail = apexOwnerEmail.value().trim().toLowerCase();
-  const recruiterEmail = apexRecruiterEmail.value().trim().toLowerCase();
-  const role = email === ownerEmail ? 'owner' : email === recruiterEmail ? 'recruiter' : null;
+  const ownerEmails = emailList(apexOwnerEmail.value());
+  const recruiterEmails = emailList(apexRecruiterEmail.value());
+  const role = ownerEmails.has(email) ? 'owner' : recruiterEmails.has(email) ? 'recruiter' : null;
   if (!role) throw new HttpsError('permission-denied', 'This Google account is not approved for Apex Talent Archive.');
 
   const displayName = String(request.auth.token.name ?? (role === 'owner' ? 'Nilhan' : 'Prashanthi')).slice(0, 100);
