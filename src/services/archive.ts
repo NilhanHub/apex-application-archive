@@ -1,8 +1,7 @@
-import type { Unsubscribe, User } from 'firebase/auth';
+import type { Unsubscribe } from 'firebase/auth';
 import {
   collection,
   doc,
-  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -15,7 +14,7 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { getBlob, ref } from 'firebase/storage';
 import { db, functions, storage } from '../firebase/data';
-import type { ApplicationRecord, RecruiterState, SyncRun, SyncState, UserProfile } from '../types';
+import type { ApplicationRecord, RecruiterState, SyncRun, SyncState } from '../types';
 
 function iso(value: unknown): string | null {
   if (!value) return null;
@@ -74,23 +73,6 @@ export function applicationFromData(id: string, data: DocumentData): Application
     firstImportedAt: iso(data.firstImportedAt),
     lastSeenAt: iso(data.lastSeenAt),
     updatedAt: iso(data.updatedAt),
-  };
-}
-
-export async function loadUserProfile(user: User): Promise<UserProfile> {
-  if (!db) throw new Error('Firebase is not configured.');
-  const snapshot = await getDoc(doc(db, 'users', user.uid));
-  const data = snapshot.data();
-  if (!snapshot.exists() || data?.approved !== true || data?.active !== true) {
-    throw new Error('This Google account is not approved for Apex Talent Archive.');
-  }
-  return {
-    uid: user.uid,
-    email: user.email ?? String(data.email ?? ''),
-    displayName: String(data.displayName ?? user.displayName ?? 'Recruiter'),
-    role: data.role === 'owner' ? 'owner' : 'recruiter',
-    approved: true,
-    active: true,
   };
 }
 

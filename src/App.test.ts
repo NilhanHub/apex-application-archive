@@ -14,6 +14,10 @@ describe('authentication boundary', () => {
     expect(displayError({ code: 'auth/popup-blocked' })).toContain('pop-ups');
     expect(displayError({ code: 'functions/permission-denied' })).toContain('not approved');
     expect(displayError({ code: 'functions/not-found' })).toContain('not available yet');
+    expect(displayError({ code: 'access/not-approved' })).toContain('not approved');
+    expect(displayError({ code: 'firestore/permission-denied' })).toContain('not approved');
+    expect(displayError({ code: 'auth/unauthorized-domain' })).toContain('not authorized');
+    expect(displayError({ code: 'auth/user-disabled' })).toContain('disabled');
     expect(displayError({ code: 'auth/unknown-failure' })).not.toContain('auth/unknown-failure');
   });
 });

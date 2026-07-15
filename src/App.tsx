@@ -26,7 +26,7 @@ import {
   Star,
   X,
 } from 'lucide-react';
-import { GoogleAuthProvider, onAuthStateChanged, signInWithRedirect, signOut } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithRedirect, signOut } from 'firebase/auth';
 import { demoApplications, demoSyncRuns, demoSyncState } from './data/demoApplications';
 import { auth } from './firebase/auth';
 import { isFirebaseConfigured } from './firebase/env';
@@ -113,13 +113,22 @@ export function displayError(error: unknown): string {
     'auth/popup-blocked': 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again.',
     'auth/popup-closed-by-user': 'Sign-in was cancelled before completion.',
     'auth/network-request-failed': 'The sign-in service could not be reached. Check your connection and try again.',
+    'auth/unauthorized-domain': 'This website is not authorized to use Google sign-in.',
+    'auth/redirect-cancelled-by-user': 'Google sign-in was cancelled before completion.',
+    'auth/user-disabled': 'This Google account has been disabled for this archive.',
+    'access/email-unverified': 'Use a verified approved Google account to open this archive.',
+    'access/not-approved': 'This Google account is not approved for Apex Talent Archive.',
+    'access/profile-invalid': 'This archive profile is inactive or has invalid access settings.',
+    'access/profile-unavailable': 'This archive profile is inactive or unavailable. Contact the archive owner.',
+    'permission-denied': 'This Google account is not approved for Apex Talent Archive.',
+    'firestore/permission-denied': 'This Google account is not approved for Apex Talent Archive.',
     'functions/permission-denied': 'This Google account is not approved for Apex Talent Archive.',
     'functions/unauthenticated': 'Your sign-in session has expired. Please sign in again.',
     'functions/not-found': 'The archive service is not available yet. Please try again shortly.',
     'functions/unavailable': 'The archive service is temporarily unavailable. Please try again.',
   };
   if (friendlyMessages[code]) return friendlyMessages[code];
-  if (code.startsWith('auth/') || code.startsWith('functions/')) {
+  if (code.startsWith('auth/') || code.startsWith('functions/') || code.startsWith('access/') || code.startsWith('firestore/')) {
     return 'The archive could not complete that request. Please try again.';
   }
   if (error instanceof Error) return error.message;
@@ -427,19 +436,22 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (demoMode || !auth) { setAuthReady(true); return; }
-    return onAuthStateChanged(auth, async (user) => {
-      setError('');
-      if (!user) { setProfile(null); setAuthReady(true); return; }
-      try {
-        const { provisionCurrentUser } = await import('./services/access');
-        await provisionCurrentUser();
-        const { loadUserProfile } = await import('./services/archive');
-        setProfile(await loadUserProfile(user));
-      }
-      catch (caught) { setProfile(null); setError(displayError(caught)); if (auth) await signOut(auth); }
-      finally { setAuthReady(true); }
-    });
+    const activeAuth = auth;
+    if (demoMode || !activeAuth) { setAuthReady(true); return; }
+    let disposed = false;
+    let stop: () => void = () => undefined;
+    void import('./services/authSession').then(({ startAuthSession }) => {
+      if (disposed) return;
+      stop = startAuthSession(activeAuth, {
+        onPhase: (phase) => {
+          if (phase === 'resolving' || phase === 'provisioning') setAuthReady(false);
+          if (phase === 'signedOut') { setProfile(null); setAuthReady(true); }
+        },
+        onReady: (nextProfile) => { setProfile(nextProfile); setError(''); setAuthReady(true); },
+        onError: (caught) => setError(displayError(caught)),
+      });
+    }).catch((caught) => { if (!disposed) { setProfile(null); setError(displayError(caught)); setAuthReady(true); } });
+    return () => { disposed = true; stop(); };
   }, []);
 
   useEffect(() => {
