@@ -114,7 +114,7 @@ A read-only authenticated check on 15 July 2026 returned 164 form `2989` applica
 
 ## Known Operational Limits
 
-- The first backend production deployment is blocked until the linked-project quota increase is approved and Firebase billing is enabled. The approved email allowlist is already configured locally as `nilhan.dev@gmail.com,nilhan@gmail.com` for owner access and `prashanthiratnayake23@gmail.com` for recruiter access.
+- The first backend production deployment is blocked until the linked-project quota increase is approved and Firebase billing is enabled. The approved email allowlist is already configured locally as `authorized-user-2@example.test,authorized-user-3@example.test` for owner access and `authorized-user-4@example.test` for recruiter access.
 - The live WordPress bridge is still plugin version `1.0.0`. It returns 164 form `2989` applications but no canonical `files[]`; v2 must be deployed through WordPress or Hostinger production file access before any backfill is accepted.
 - The frontend production dependency audit reports zero findings. The Functions production dependency audit currently reports nine moderate transitive findings in Firebase/Google packages and no high or critical findings. `firebase-functions` is declared at the current compatible `7.2.5`; its peer range still excludes `firebase-admin` 14, so the unsupported automated major downgrade/upgrade path is deliberately not forced.
 - PDF, image, and TXT CVs can preview in-app. DOC/DOCX files download rather than render inline.

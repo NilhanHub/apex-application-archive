@@ -3,7 +3,7 @@
     "providers": {
       "googleSignIn": {
         "oAuthBrandDisplayName": "Apex Talent Archive",
-        "supportEmail": "nilhan.dev@gmail.com"
+        "supportEmail": "authorized-user-2@example.test"
       }
     }
   },

@@ -8,7 +8,7 @@ import {
   type ProfileBootstrapDependencies,
 } from './access';
 
-function authUser(email = 'nilhan.dev@gmail.com', verified = true): User {
+function authUser(email = 'authorized-user-2@example.test', verified = true): User {
   return {
     uid: 'approved-user',
     email,
@@ -30,9 +30,9 @@ function profile(user: User, role: ApprovedRole = 'owner'): UserProfile {
 
 describe('approved-user profile bootstrap', () => {
   it('maps only the three approved emails to fixed roles', () => {
-    expect(approvedRoleForEmail(' NILHAN.DEV@gmail.com ')).toBe('owner');
-    expect(approvedRoleForEmail('nilhan@gmail.com')).toBe('owner');
-    expect(approvedRoleForEmail('prashanthiratnayake23@gmail.com')).toBe('recruiter');
+    expect(approvedRoleForEmail(' authorized-user-2@example.test ')).toBe('owner');
+    expect(approvedRoleForEmail('authorized-user-3@example.test')).toBe('owner');
+    expect(approvedRoleForEmail('authorized-user-4@example.test')).toBe('recruiter');
     expect(approvedRoleForEmail('someone@example.com')).toBeNull();
   });
 
@@ -83,7 +83,7 @@ describe('approved-user profile bootstrap', () => {
       createProfile: vi.fn(),
     };
 
-    await expect(bootstrapCurrentUser(authUser('nilhan.dev@gmail.com', false), dependencies))
+    await expect(bootstrapCurrentUser(authUser('authorized-user-2@example.test', false), dependencies))
       .rejects.toMatchObject({ code: 'access/email-unverified' });
     await expect(bootstrapCurrentUser(authUser('someone@example.com'), dependencies))
       .rejects.toMatchObject({ code: 'access/not-approved' });

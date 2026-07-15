@@ -425,7 +425,7 @@ function SyncView({ state, runs, profile, demo, onRunSync }: { state: SyncState;
 }
 
 export default function App() {
-  const [profile, setProfile] = useState<UserProfile | null>(demoMode ? { uid: 'demo-owner', email: 'demo@apexhrm.com', displayName: 'Nilhan', role: 'owner', approved: true, active: true } : null);
+  const [profile, setProfile] = useState<UserProfile | null>(demoMode ? { uid: 'demo-owner', email: 'authorized-user-1@example.test', displayName: 'Nilhan', role: 'owner', approved: true, active: true } : null);
   const [applications, setApplications] = useState<ApplicationRecord[]>(demoMode ? demoApplications : []);
   const [syncState, setSyncState] = useState<SyncState>(demoMode ? demoSyncState : EMPTY_SYNC_STATE);
   const [runs, setRuns] = useState<SyncRun[]>(demoMode ? demoSyncRuns : []);

@@ -54,12 +54,12 @@ describe('application rules', () => {
 describe('approved account provisioning', () => {
   it('allows approved verified users to create only their assigned role', async () => {
     const owner = testEnvironment.authenticatedContext('new-owner', {
-      email: 'nilhan.dev@gmail.com',
+      email: 'authorized-user-2@example.test',
       email_verified: true,
     }).firestore();
     await assertSucceeds(setDoc(doc(owner, 'users/new-owner'), {
       uid: 'new-owner',
-      email: 'nilhan.dev@gmail.com',
+      email: 'authorized-user-2@example.test',
       displayName: 'Nilhan',
       role: 'owner',
       approved: true,
@@ -68,12 +68,12 @@ describe('approved account provisioning', () => {
     }));
 
     const recruiter = testEnvironment.authenticatedContext('new-recruiter', {
-      email: 'prashanthiratnayake23@gmail.com',
+      email: 'authorized-user-4@example.test',
       email_verified: true,
     }).firestore();
     await assertFails(setDoc(doc(recruiter, 'users/new-recruiter'), {
       uid: 'new-recruiter',
-      email: 'prashanthiratnayake23@gmail.com',
+      email: 'authorized-user-4@example.test',
       displayName: 'Prashanthi',
       role: 'owner',
       approved: true,
