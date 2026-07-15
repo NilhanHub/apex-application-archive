@@ -109,6 +109,6 @@ A read-only authenticated check on 15 July 2026 returned 164 form `2989` applica
 
 - The first backend production deployment is blocked until Firebase billing is enabled. The approved email allowlist is already configured locally as `nilhan.dev@gmail.com,nilhan@gmail.com` for owner access and `prashanthiratnayake23@gmail.com` for recruiter access.
 - Google sign-in has not been fully initialized yet because the Identity Toolkit admin initialization path also returned `BILLING_NOT_ENABLED` for this project. Enable it from Firebase Console after Blaze is active, or rerun the API setup.
-- The Functions production dependency audit currently reports eight moderate transitive findings in Firebase/Google packages and no high or critical findings. The automated all-fixes path proposes breaking version changes, so upgrades should be tested deliberately rather than forced during rollout.
+- The frontend production dependency audit reports zero findings. The Functions production dependency audit currently reports nine moderate transitive findings in Firebase/Google packages and no high or critical findings. The automated all-fixes path proposes breaking version changes, so upgrades should be tested deliberately rather than forced during rollout.
 - PDF, image, and TXT CVs can preview in-app. DOC/DOCX files download rather than render inline.
 - The client-side search index is appropriate for this archive size. Reassess an external search service only if the archive grows beyond roughly 5,000 applications or browser indexing becomes measurably slow.
